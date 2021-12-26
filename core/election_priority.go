@@ -1,9 +1,7 @@
 package core
 
-type ElectionPriority int
-
 const (
-	Disabled   ElectionPriority = -1
-	NotElected ElectionPriority = 0
-	MinValue   ElectionPriority = 1
+	ElectionPriorityDisabled   int = -1
+	ElectionPriorityNotElected int = 0
+	ElectionPriorityMinValue   int = 1
 )
