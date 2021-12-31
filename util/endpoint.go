@@ -1,6 +1,6 @@
 package util
 
 type EndPoint struct {
-	Ip   string
+	IP   string
 	Port int
 }
