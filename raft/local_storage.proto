@@ -1,0 +1,30 @@
+syntax="proto3";
+import "raft.proto";
+import "local_file_meta.proto";
+
+package raft;
+option go_package = "github.com/AllenShaw19/raft/raft;raft";
+
+message ConfigurationPBMeta {
+  repeated string peers = 1;
+  repeated string old_peers = 2;
+};
+
+message LogPBMeta {
+   int64 first_log_index = 1;
+};
+
+message StablePBMeta {
+  int64 term = 1;
+  string votedfor = 2;
+};
+
+message LocalSnapshotPbMeta {
+  message File {
+    string name = 1;
+    optional LocalFileMeta meta = 2;
+  };
+  optional SnapshotMeta meta = 1;
+  repeated File files = 2;
+}
+
