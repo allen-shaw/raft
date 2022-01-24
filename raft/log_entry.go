@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/AllenShaw19/raft/utils"
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 )
 
 type LogID struct {
