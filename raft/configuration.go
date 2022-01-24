@@ -2,15 +2,26 @@ package raft
 
 import (
 	"fmt"
-	"github.com/AllenShaw19/raft/log"
-	"github.com/AllenShaw19/raft/utils"
 	"strconv"
 	"strings"
+
+	"github.com/AllenShaw19/raft/log"
+	"github.com/AllenShaw19/raft/utils"
 )
 
 type PeerId struct {
 	Addr utils.EndPoint
 	Idx  int
+}
+
+func NewPeerId(s string) *PeerId {
+	p := &PeerId{}
+	err := p.Parse(s)
+	if err != nil {
+		log.Error("parse str %s to peerID fail, err %v", s, err)
+		return nil
+	}
+	return p
 }
 
 func (pid *PeerId) Reset() {

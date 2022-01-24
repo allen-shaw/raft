@@ -25,9 +25,9 @@ type EntryMeta struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Term  int64          `protobuf:"varint,1,opt,name=term,proto3" json:"term,omitempty"`
-	Type  raft.EntryType `protobuf:"varint,2,opt,name=type,proto3,enum=raft.EntryType" json:"type,omitempty"`
-	Peers []string       `protobuf:"bytes,3,rep,name=peers,proto3" json:"peers,omitempty"`
+	Term    int64     `protobuf:"varint,1,opt,name=term,proto3" json:"term,omitempty"`
+	Type    EntryType `protobuf:"varint,2,opt,name=type,proto3,enum=raft.EntryType" json:"type,omitempty"`
+	Peers   []string  `protobuf:"bytes,3,rep,name=peers,proto3" json:"peers,omitempty"`
 	DataLen *int64    `protobuf:"varint,4,opt,name=data_len,json=dataLen,proto3,oneof" json:"data_len,omitempty"`
 	// Don't change field id of `old_peers' in the consideration of backward
 	// compatibility
@@ -73,11 +73,11 @@ func (x *EntryMeta) GetTerm() int64 {
 	return 0
 }
 
-func (x *EntryMeta) GetType() raft.EntryType {
+func (x *EntryMeta) GetType() EntryType {
 	if x != nil {
 		return x.Type
 	}
-	return raft.EntryType_ENTRY_TYPE_UNKNOWN
+	return EntryType_ENTRY_TYPE_UNKNOWN
 }
 
 func (x *EntryMeta) GetPeers() []string {
@@ -1030,7 +1030,7 @@ var file_raft_proto_goTypes = []interface{}{
 	(*InstallSnapshotResponse)(nil), // 8: raft.InstallSnapshotResponse
 	(*TimeoutNowRequest)(nil),       // 9: raft.TimeoutNowRequest
 	(*TimeoutNowResponse)(nil),      // 10: raft.TimeoutNowResponse
-	(raft.EntryType)(0),             // 11: raft.EntryType
+	(EntryType)(0),                  // 11: raft.EntryType
 }
 var file_raft_proto_depIdxs = []int32{
 	11, // 0: raft.EntryMeta.type:type_name -> raft.EntryType
@@ -1059,7 +1059,7 @@ func file_raft_proto_init() {
 	if File_raft_proto != nil {
 		return
 	}
-	raft.file_enum_proto_init()
+	file_enum_proto_init()
 	if !protoimpl.UnsafeEnabled {
 		file_raft_proto_msgTypes[0].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*EntryMeta); i {
