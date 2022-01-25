@@ -1,7 +1,7 @@
 package raft
 
 type LogManagerOptions struct {
-	LogStorage *LogStorage
+	LogStorage LogStorage
 	ConfMgr    *ConfigurationManager
 	FSMCaller  *FSMCaller
 }

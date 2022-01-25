@@ -1,12 +1,12 @@
 package utils
 
-type State struct {
+type state struct {
 	Code    int32
 	Message string
 }
 
 type Status struct {
-	state *State
+	state *state
 }
 
 func (s *Status) Code() int32 {
