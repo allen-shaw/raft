@@ -2,18 +2,23 @@ package raft
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 
 	"github.com/AllenShaw19/raft/log"
+	"github.com/AllenShaw19/raft/utils"
 )
 
 const (
-	RAFT_SEGMENT_OPEN_PATTERN    = "log_inprogress_%020d"
-	BRAFT_SEGMENT_CLOSED_PATTERN = "log_%020d_%020d"
-	BRAFT_SEGMENT_META_FILE      = "log_meta"
+	RAFT_SEGMENT_OPEN_PATTERN   = "log_inprogress_%020d"
+	RAFT_SEGMENT_CLOSED_PATTERN = "log_%020d_%020d"
+	RAFT_SEGMENT_META_FILE      = "log_meta"
+
+	ENTRY_HEADER_SIZE uint64 = 24
 )
 
 type ChecksumType int
@@ -76,7 +81,7 @@ func NewSegment(path string, firstIndex, lastIndex int64, checksumType int) *Seg
 
 func (s *Segment) Create() error {
 	if !s.isOpen {
-		log.Error("Check failed: Create on a closed segment at first_index=%s in %s", s.firstIndex, s.path)
+		log.Error("Check failed: Create on a closed segment at first_index=%v in %s", s.firstIndex, s.path)
 		return fmt.Errorf("fail to create on a closed segment")
 	}
 	path := filepath.Join(s.path, fmt.Sprintf(RAFT_SEGMENT_OPEN_PATTERN, s.firstIndex))
@@ -90,8 +95,58 @@ func (s *Segment) Create() error {
 	return nil
 }
 
-func (s *Segment) Load(m *ConfigurationManager) {
-	
+func (s *Segment) Load(m *ConfigurationManager) error {
+	var err error
+	path := s.path
+	if s.isOpen {
+		path = filepath.Join(path, fmt.Sprintf(RAFT_SEGMENT_OPEN_PATTERN, s.firstIndex))
+	} else {
+		path = filepath.Join(path, fmt.Sprintf(RAFT_SEGMENT_CLOSED_PATTERN, s.firstIndex, atomic.LoadInt64(&s.lastIndex)))
+	}
+
+	f, err := os.OpenFile(path, os.O_RDWR, 0644)
+	if err != nil {
+		log.Error()
+		return err
+	}
+	s.file = f
+	stat, err := f.Stat()
+	if err != nil {
+		log.Error()
+		return err
+	}
+
+	// load entry index
+	fileSize := stat.Size()
+	entryOff := int64(0)
+	actualLastIndex := s.firstIndex - 1
+	for i := s.firstIndex; entryOff < fileSize; i++ {
+
+	}
+
+	lastIndex := atomic.LoadInt64(&s.lastIndex)
+	if err == nil && !s.isOpen {
+
+	}
+
+	if err != nil {
+		return err
+	}
+
+	if s.isOpen {
+		atomic.StoreInt64(&s.lastIndex, actualLastIndex)
+	}
+
+	// truncate last uncompleted entry
+	if entryOff != fileSize {
+		log.Info()
+		err = ftruncateUninterrupted()
+	}
+
+	ret, err := s.file.Seek(entryOff, os.SEEK_SET)
+
+	s.bytes = entryOff
+	return err
 }
 
 func (s *Segment) Append(entry *LogEntry) {}
@@ -100,11 +155,22 @@ func (s *Segment) Get(index int64) *LogEntry {
 	return nil
 }
 
-func (s *Segment) GetTerm(index int64) int64 {}
+func (s *Segment) GetTerm(index int64) (int64, error) {
+	meta, err := s.getMeta(index)
+	if err != nil {
+		return 0, err
+	}
+	return meta.term, nil
+}
 
 func (s *Segment) Close(sync bool) {}
 
-func (s *Segment) Sync(sync bool) {}
+func (s *Segment) Sync(sync bool) error {
+	if s.lastIndex > s.firstIndex && sync {
+		s.file.Sync()
+	}
+	return nil
+}
 
 func (s *Segment) Unlink() {}
 
@@ -127,23 +193,123 @@ func (s *Segment) LastIndex() int64 {
 }
 
 func (s *Segment) FileName() string {
-
+	if !s.isOpen {
+		return fmt.Sprintf(RAFT_SEGMENT_CLOSED_PATTERN, s.firstIndex, atomic.LoadInt64(&s.lastIndex))
+	}
+	return fmt.Sprintf(RAFT_SEGMENT_OPEN_PATTERN, s.firstIndex)
 }
 
-func (s *Segment) loadEntry(offset int64, head *entryHeader, body *bytes.Buffer, sizeHint uint64) {
+func (s *Segment) loadEntry(offset int64, head *entryHeader, data *bytes.Buffer, sizeHint uint64) error {
+	var buf bytes.Buffer
+	toRead := sizeHint
+	if toRead < ENTRY_HEADER_SIZE {
+		toRead = ENTRY_HEADER_SIZE
+	}
 
+	n, err := filePread(&buf, s.file, offset, toRead)
+	if err != nil {
+		log.Error("read file %s fail, offset %d, to read size %d, err %v", s.path, offset, toRead, err)
+		return err
+	}
+	if n != toRead {
+		log.Error("read file %s fail, read len %d, to read %d", s.path, n, toRead)
+		return errors.New("read file fail")
+	}
+
+	headerBuf := bytes.NewBuffer(buf.Next(int(ENTRY_HEADER_SIZE)))
+	unpacker := utils.NewRawUnpacker(headerBuf)
+
+	term := unpacker.Unpack64()
+	metaField := unpacker.Unpack32()
+	dataLen := unpacker.Unpack32()
+	dataChecksum := unpacker.Unpack32()
+	headerChecksum := unpacker.Unpack32()
+
+	tmp := entryHeader{
+		term:         int64(term),
+		entryType:    int(metaField >> 24),
+		checksumType: int((metaField << 8) >> 24),
+		dataLen:      uint64(dataLen),
+		dataChecksum: dataChecksum,
+	}
+
+	if !verifyChecksum(tmp.checksumType, headerBuf.Bytes()[:ENTRY_HEADER_SIZE-4], headerChecksum) {
+		log.Error("Found corrupted header at offset=%d, header=%s, path: %s", offset, tmp.String(), s.path)
+		return errors.New("verify header checksum fail")
+	}
+	if head != nil {
+		*head = tmp
+	}
+
+	if data != nil {
+		if buf.Len() < int(ENTRY_HEADER_SIZE+uint64(dataLen)) {
+			toRead := ENTRY_HEADER_SIZE + uint64(dataLen) - uint64(buf.Len())
+			n, err := filePread(&buf, s.file, offset+int64(buf.Len()), toRead)
+			if err != nil {
+
+			}
+			if n != toRead {
+
+			}
+		} else if buf.Len() > int(ENTRY_HEADER_SIZE)+int(dataLen) {
+			buf.Truncate(int(ENTRY_HEADER_SIZE) + int(dataLen))
+		}
+		if buf.Len() != int(ENTRY_HEADER_SIZE)+int(dataLen) {
+
+		}
+		buf.Next(int(ENTRY_HEADER_SIZE))
+		if !verifyChecksum(tmp.checksumType, buf.Bytes(), tmp.dataChecksum) {
+
+		}
+		data.Reset()
+		n, err := data.ReadFrom(&buf)
+		if err != nil {
+
+		}
+	}
+
+	return nil
 }
 
 func (s *Segment) getMeta(index int64) (*logMeta, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
 
+	if index > atomic.LoadInt64(&s.lastIndex) || index < s.firstIndex {
+		log.Error("invalid index=%v, lastIndex=%v, firstIndex=%v",
+			index, atomic.LoadInt64(&s.lastIndex), s.firstIndex)
+		return nil, errors.New("invalid index")
+	} else if s.lastIndex == s.firstIndex-1 {
+		log.Error("lastIndex=%v, firstIndex=%v", atomic.LoadInt64(&s.lastIndex), s.firstIndex)
+		return nil, errors.New("invalid lastIndex And firstIndex")
+	}
+
+	metaIndex := index - s.firstIndex
+	entryCursor := s.offsetAndTerm[metaIndex].offset
+	nextCursor := s.bytes
+	if index < atomic.LoadInt64(&s.lastIndex) {
+		nextCursor = s.offsetAndTerm[metaIndex+1].offset
+	}
+
+	if entryCursor >= nextCursor {
+		log.Fatal("entryCursor %v >= nextCursor %v", entryCursor, nextCursor)
+	}
+
+	meta := &logMeta{
+		offset: entryCursor,
+		term:   s.offsetAndTerm[metaIndex].term,
+		length: uint64(nextCursor - nextCursor),
+	}
+	return meta, nil
 }
 
 func (s *Segment) truncateMetaAndGetLast(last int64) int {
 
+	return 0
 }
 
 func (s *Segment) String() string {
-
+	return ""
 }
 
 // SegmentLogStorage implement LogStorage
