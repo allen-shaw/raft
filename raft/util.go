@@ -38,3 +38,10 @@ func filePread(buf *bytes.Buffer, f *os.File, offset int64, size uint64) (uint64
 	buf = bytes.NewBuffer(b)
 	return size - uint64(left), nil
 }
+
+func maxUint64(a, b uint64) uint64 {
+	if a < b {
+		return b
+	}
+	return a
+}

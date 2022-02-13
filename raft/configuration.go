@@ -24,33 +24,33 @@ func NewPeerId(s string) *PeerId {
 	return p
 }
 
-func (pid *PeerId) Reset() {
-	pid.Addr.IP = utils.IP_ANY
-	pid.Addr.Port = 0
-	pid.Idx = 0
+func (peer *PeerId) Reset() {
+	peer.Addr.IP = utils.IP_ANY
+	peer.Addr.Port = 0
+	peer.Idx = 0
 }
 
-func (pid *PeerId) IsEmpty() bool {
-	return pid.Addr.IP == utils.IP_ANY && pid.Addr.Port == 0 && pid.Idx == 0
+func (peer *PeerId) IsEmpty() bool {
+	return peer.Addr.IP == utils.IP_ANY && peer.Addr.Port == 0 && peer.Idx == 0
 }
 
-func (pid *PeerId) Parse(str string) error {
-	pid.Reset()
+func (peer *PeerId) Parse(str string) error {
+	peer.Reset()
 	addrs := strings.Split(str, ":")
 	if len(addrs) < 2 {
-		pid.Reset()
+		peer.Reset()
 		log.Error("Parse %v fail, len %d less than 2", str, len(addrs))
 		return fmt.Errorf("invalid addr")
 	}
 	var err error
-	pid.Addr.IP = addrs[0]
-	pid.Addr.Port, err = strconv.Atoi(addrs[1])
+	peer.Addr.IP = addrs[0]
+	peer.Addr.Port, err = strconv.Atoi(addrs[1])
 	if err != nil {
 		log.Error("Parse %v fail, %v", str, err)
 		return err
 	}
 	if len(addrs) >= 3 {
-		pid.Idx, err = strconv.Atoi(addrs[2])
+		peer.Idx, err = strconv.Atoi(addrs[2])
 		if err != nil {
 			log.Error("Parse %v fail, %v", str, err)
 			return err
@@ -60,6 +60,40 @@ func (pid *PeerId) Parse(str string) error {
 	return nil
 }
 
-func (pid *PeerId) String() string {
-	return fmt.Sprintf("%s:%d", pid.Addr.String(), pid.Idx)
+func (peer *PeerId) String() string {
+	return fmt.Sprintf("%s:%d", peer.Addr.String(), peer.Idx)
+}
+
+// Configuration begin
+type Configuration struct {
+	peers map[PeerId]struct{}
+}
+
+func NewConfiguration(peers []*PeerId) *Configuration {
+	c := &Configuration{}
+	for _, peer := range peers {
+		c.peers[*peer] = struct{}{}
+	}
+	return c
+}
+
+func (c *Configuration) Empty() bool {
+	return len(c.peers) == 0
+}
+
+func (c *Configuration) Contains(peer *PeerId) bool {
+	_, ok := c.peers[*peer]
+	return ok
+}
+
+func (c *Configuration) Size() int {
+	return len(c.peers)
+}
+
+func (c *Configuration) ListPeers() []PeerId {
+	peers := make([]PeerId, 0, c.Size())
+	for peer := range c.peers {
+		peers = append(peers, peer)
+	}
+	return peers
 }

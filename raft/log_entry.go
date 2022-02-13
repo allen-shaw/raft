@@ -42,6 +42,14 @@ type LogEntry struct {
 	Data     bytes.Buffer
 }
 
+func NewLogEntry() *LogEntry {
+	return &LogEntry{
+		Type:     EntryType_ENTRY_TYPE_UNKNOWN,
+		Peers:    nil,
+		OldPeers: nil,
+	}
+}
+
 func ParseConfigurationMeta(data *bytes.Buffer, entry *LogEntry) utils.Status {
 	var (
 		status utils.Status

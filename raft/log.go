@@ -14,18 +14,18 @@ import (
 )
 
 const (
-	RAFT_SEGMENT_OPEN_PATTERN   = "log_inprogress_%020d"
-	RAFT_SEGMENT_CLOSED_PATTERN = "log_%020d_%020d"
-	RAFT_SEGMENT_META_FILE      = "log_meta"
+	RaftSegmentOpenPattern   = "log_inprogress_%020d"
+	RaftSegmentClosedPattern = "log_%020d_%020d"
+	RAFT_SEGMENT_META_FILE   = "log_meta"
 
-	ENTRY_HEADER_SIZE uint64 = 24
+	EntryHeaderSize uint64 = 24
 )
 
 type ChecksumType int
 
 const (
-	CHECKSUM_MURMURHASH32 ChecksumType = iota
-	CHECKSUM_CRC32
+	ChecksumMurmurhash32 ChecksumType = iota
+	ChecksumCrc32
 )
 
 type entryHeader struct {
@@ -84,7 +84,7 @@ func (s *Segment) Create() error {
 		log.Error("Check failed: Create on a closed segment at first_index=%v in %s", s.firstIndex, s.path)
 		return fmt.Errorf("fail to create on a closed segment")
 	}
-	path := filepath.Join(s.path, fmt.Sprintf(RAFT_SEGMENT_OPEN_PATTERN, s.firstIndex))
+	path := filepath.Join(s.path, fmt.Sprintf(RaftSegmentOpenPattern, s.firstIndex))
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		log.Error("Fail to open file %s", path)
@@ -99,20 +99,20 @@ func (s *Segment) Load(m *ConfigurationManager) error {
 	var err error
 	path := s.path
 	if s.isOpen {
-		path = filepath.Join(path, fmt.Sprintf(RAFT_SEGMENT_OPEN_PATTERN, s.firstIndex))
+		path = filepath.Join(path, fmt.Sprintf(RaftSegmentOpenPattern, s.firstIndex))
 	} else {
-		path = filepath.Join(path, fmt.Sprintf(RAFT_SEGMENT_CLOSED_PATTERN, s.firstIndex, atomic.LoadInt64(&s.lastIndex)))
+		path = filepath.Join(path, fmt.Sprintf(RaftSegmentClosedPattern, s.firstIndex, atomic.LoadInt64(&s.lastIndex)))
 	}
 
 	f, err := os.OpenFile(path, os.O_RDWR, 0644)
 	if err != nil {
-		log.Error()
+		log.Error("open file fail, path=%s, err=%v", path, err)
 		return err
 	}
 	s.file = f
 	stat, err := f.Stat()
 	if err != nil {
-		log.Error()
+		log.Error("get file stat fail, path=%s, err=%v", path, err)
 		return err
 	}
 
@@ -121,7 +121,30 @@ func (s *Segment) Load(m *ConfigurationManager) error {
 	entryOff := int64(0)
 	actualLastIndex := s.firstIndex - 1
 	for i := s.firstIndex; entryOff < fileSize; i++ {
+		header := &entryHeader{}
+		err = s.loadEntry(entryOff, header, nil, EntryHeaderSize)
+		if err != nil {
+			break
+		}
+		skipLen := EntryHeaderSize + header.dataLen
+		if int64(skipLen)+entryOff > fileSize {
+			break
+		}
+		if EntryType(header.entryType) == EntryType_ENTRY_TYPE_CONFIGURATION {
+			data := bytes.NewBuffer(make([]byte, 0))
+			if err := s.loadEntry(entryOff, nil, data, skipLen); err != nil {
+				break
+			}
+			entry := NewLogEntry()
+			entry.ID.Index = i
+			entry.ID.Term = header.term
+			status := ParseConfigurationMeta(data, entry)
+			if status.OK() {
+				confEntry := NewConfigurationEntry(entry)
 
+			}
+
+		}
 	}
 
 	lastIndex := atomic.LoadInt64(&s.lastIndex)
@@ -194,17 +217,14 @@ func (s *Segment) LastIndex() int64 {
 
 func (s *Segment) FileName() string {
 	if !s.isOpen {
-		return fmt.Sprintf(RAFT_SEGMENT_CLOSED_PATTERN, s.firstIndex, atomic.LoadInt64(&s.lastIndex))
+		return fmt.Sprintf(RaftSegmentClosedPattern, s.firstIndex, atomic.LoadInt64(&s.lastIndex))
 	}
-	return fmt.Sprintf(RAFT_SEGMENT_OPEN_PATTERN, s.firstIndex)
+	return fmt.Sprintf(RaftSegmentOpenPattern, s.firstIndex)
 }
 
 func (s *Segment) loadEntry(offset int64, head *entryHeader, data *bytes.Buffer, sizeHint uint64) error {
 	var buf bytes.Buffer
-	toRead := sizeHint
-	if toRead < ENTRY_HEADER_SIZE {
-		toRead = ENTRY_HEADER_SIZE
-	}
+	toRead := maxUint64(sizeHint, EntryHeaderSize)
 
 	n, err := filePread(&buf, s.file, offset, toRead)
 	if err != nil {
@@ -216,7 +236,7 @@ func (s *Segment) loadEntry(offset int64, head *entryHeader, data *bytes.Buffer,
 		return errors.New("read file fail")
 	}
 
-	headerBuf := bytes.NewBuffer(buf.Next(int(ENTRY_HEADER_SIZE)))
+	headerBuf := bytes.NewBuffer(buf.Next(int(EntryHeaderSize)))
 	unpacker := utils.NewRawUnpacker(headerBuf)
 
 	term := unpacker.Unpack64()
@@ -233,7 +253,7 @@ func (s *Segment) loadEntry(offset int64, head *entryHeader, data *bytes.Buffer,
 		dataChecksum: dataChecksum,
 	}
 
-	if !verifyChecksum(tmp.checksumType, headerBuf.Bytes()[:ENTRY_HEADER_SIZE-4], headerChecksum) {
+	if !verifyChecksum(tmp.checksumType, headerBuf.Bytes()[:EntryHeaderSize-4], headerChecksum) {
 		log.Error("Found corrupted header at offset=%d, header=%s, path: %s", offset, tmp.String(), s.path)
 		return errors.New("verify header checksum fail")
 	}
@@ -242,29 +262,38 @@ func (s *Segment) loadEntry(offset int64, head *entryHeader, data *bytes.Buffer,
 	}
 
 	if data != nil {
-		if buf.Len() < int(ENTRY_HEADER_SIZE+uint64(dataLen)) {
-			toRead := ENTRY_HEADER_SIZE + uint64(dataLen) - uint64(buf.Len())
+		if buf.Len() < int(EntryHeaderSize+uint64(dataLen)) {
+			toRead := EntryHeaderSize + uint64(dataLen) - uint64(buf.Len())
 			n, err := filePread(&buf, s.file, offset+int64(buf.Len()), toRead)
 			if err != nil {
-
+				log.Error("read file %s fail, offset %d, to read size %d, err %v", s.path, offset+int64(buf.Len()), toRead, err)
+				return err
 			}
 			if n != toRead {
-
+				log.Error("read file %s fail, read len %d, to read %d", s.path, n, toRead)
+				return errors.New("read file fail")
 			}
-		} else if buf.Len() > int(ENTRY_HEADER_SIZE)+int(dataLen) {
-			buf.Truncate(int(ENTRY_HEADER_SIZE) + int(dataLen))
+		} else if buf.Len() > int(EntryHeaderSize)+int(dataLen) {
+			buf.Truncate(int(EntryHeaderSize) + int(dataLen))
 		}
-		if buf.Len() != int(ENTRY_HEADER_SIZE)+int(dataLen) {
-
+		if buf.Len() != int(EntryHeaderSize)+int(dataLen) {
+			log.Error("read file %s fail, read buffer len=%d, not equal data_size=%d", s.path, buf.Len(), uint32(EntryHeaderSize)+dataLen)
+			return errors.New("read file fail")
 		}
-		buf.Next(int(ENTRY_HEADER_SIZE))
+		buf.Next(int(EntryHeaderSize))
 		if !verifyChecksum(tmp.checksumType, buf.Bytes(), tmp.dataChecksum) {
-
+			log.Error("Found corrupted data at offset=%d, header=%v, path=%s", offset+int64(EntryHeaderSize), tmp, s.path)
+			return errors.New("buffer checksum invalid")
 		}
 		data.Reset()
 		n, err := data.ReadFrom(&buf)
 		if err != nil {
-
+			log.Error("data read from buf fail, err %v", err)
+			return err
+		}
+		if n != int64(buf.Len()) {
+			log.Error("swap buffer fail, buf_len=%d, read data_size=%d", buf.Len(), n)
+			return errors.New("data read from buf fail")
 		}
 	}
 
@@ -319,9 +348,9 @@ type SegmentLogStorage struct {
 // util function
 func verifyChecksum(checksumType int, data []byte, value uint32) bool {
 	switch ChecksumType(checksumType) {
-	case CHECKSUM_MURMURHASH32:
+	case ChecksumMurmurhash32:
 		return (value == murmurhash32(data))
-	case CHECKSUM_CRC32:
+	case ChecksumCrc32:
 		return (value == crc32(data))
 	default:
 		log.Error("Unknown checksum type=%v", checksumType)
@@ -331,9 +360,9 @@ func verifyChecksum(checksumType int, data []byte, value uint32) bool {
 
 func getChecksum(checksumType int, data []byte) (uint32, error) {
 	switch ChecksumType(checksumType) {
-	case CHECKSUM_MURMURHASH32:
+	case ChecksumMurmurhash32:
 		return murmurhash32(data), nil
-	case CHECKSUM_CRC32:
+	case ChecksumCrc32:
 		return crc32(data), nil
 	default:
 		log.Error("Unknown checksum type=%v", checksumType)
