@@ -141,15 +141,23 @@ func (s *Segment) Load(m *ConfigurationManager) error {
 			status := ParseConfigurationMeta(data, entry)
 			if status.OK() {
 				confEntry := NewConfigurationEntry(entry)
-
+				m.Add(confEntry)
+			} else {
+				log.Error("fail to parse configuration meta, path: %s entry_off %d", s.path, entryOff)
+				err = errors.New("parse configuration meta fail")
+				break
 			}
-
 		}
+		s.offsetAndTerm = append(s.offsetAndTerm, offsetAndTerm{entryOff, header.term})
+		actualLastIndex++
+		entryOff += int64(skipLen)
 	}
 
 	lastIndex := atomic.LoadInt64(&s.lastIndex)
 	if err == nil && !s.isOpen {
-
+		if actualLastIndex < lastIndex {
+			
+		}
 	}
 
 	if err != nil {
@@ -162,7 +170,7 @@ func (s *Segment) Load(m *ConfigurationManager) error {
 
 	// truncate last uncompleted entry
 	if entryOff != fileSize {
-		log.Info()
+		log.Info("")
 		err = ftruncateUninterrupted()
 	}
 
