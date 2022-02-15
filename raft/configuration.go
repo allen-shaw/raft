@@ -9,6 +9,11 @@ import (
 	"github.com/AllenShaw19/raft/utils"
 )
 
+type GroupID string
+
+// VersionedGroupId GroupID with version, format: {group_id}_{index}
+type VersionedGroupId string
+
 type PeerId struct {
 	Addr utils.EndPoint
 	Idx  int
