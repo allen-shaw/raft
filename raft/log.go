@@ -52,6 +52,7 @@ type offsetAndTerm struct {
 	term   int64
 }
 
+//
 type Segment struct {
 	path          string
 	bytes         int64
@@ -156,7 +157,7 @@ func (s *Segment) Load(m *ConfigurationManager) error {
 	lastIndex := atomic.LoadInt64(&s.lastIndex)
 	if err == nil && !s.isOpen {
 		if actualLastIndex < lastIndex {
-			
+
 		}
 	}
 
@@ -180,7 +181,85 @@ func (s *Segment) Load(m *ConfigurationManager) error {
 	return err
 }
 
-func (s *Segment) Append(entry *LogEntry) {}
+func (s *Segment) Append(entry *LogEntry) error {
+	if entry == nil || !s.isOpen {
+		return errInvalid
+	}
+	if entry.ID.Index != atomic.LoadInt64(&s.lastIndex)+1 {
+		log.Error("entry->index=%d lastIndex=%d firstIndex=%d", entry.ID.Index, s.lastIndex, s.firstIndex)
+		return errRange
+	}
+
+	data := bytes.NewBuffer(make([]byte, 0))
+	switch entry.Type {
+	case EntryType_ENTRY_TYPE_DATA:
+		{
+			n, err := data.Write(entry.Data.Bytes())
+			if err != nil {
+				log.Error("data write fail, err %v, entry data %v", err, entry.Data.Bytes())
+				return err
+			}
+			if n != entry.Data.Len() {
+				log.Error("data write fail, write len=%v, data len=%v", n, entry.Data.Len())
+				return errors.New("data write fail")
+			}
+		}
+	case EntryType_ENTRY_TYPE_NO_OP:
+	// nothing
+	case EntryType_ENTRY_TYPE_CONFIGURATION:
+		{
+			var status utils.Status
+			data, status = SerializeConfigurationMeta(entry)
+			if !status.OK() {
+				log.Error("Fail to serialize ConfigurationPBMeta, path: %s", s.path)
+				return errors.New(status.Error())
+			}
+		}
+	default:
+		log.Fatal("unknown entry type: %v, path %s", entry.Type, s.path)
+		return errors.New("unknown entry type")
+	}
+
+	if uint64(data.Len()) >= (uint64(1) << 56) {
+
+	}
+
+	header := bytes.NewBuffer(make([]byte, 0, EntryHeaderSize))
+	metaField := uint32(entry.Type)<<24 | uint32(s.checksumType<<16)
+	packer := utils.NewRawPacker(header)
+	err := packer.Pack64(uint64(entry.ID.Term))
+	if err != nil {
+		return err
+	}
+	err = packer.Pack32(metaField)
+	if err != nil {
+		return err
+	}
+	err = packer.Pack32(uint32(data.Len()))
+	if err != nil {
+		return err
+	}
+	sum, err := getChecksum(s.checksumType, data.Bytes())
+	if err != nil {
+		return err
+	}
+	err = packer.Pack32(sum)
+	if err != nil {
+		return err
+	}
+	headerBuf := header.Bytes()
+	sum, err = getChecksum(s.checksumType, headerBuf[:len(headerBuf)-4])
+	if err != nil {
+		return err
+	}
+	err = packer.Pack32(sum)
+	if err != nil {
+		return err
+	}
+
+	toWrite := header.Len() + data.Len()
+
+}
 
 func (s *Segment) Get(index int64) *LogEntry {
 	return nil
@@ -350,7 +429,115 @@ func (s *Segment) String() string {
 }
 
 // SegmentLogStorage implement LogStorage
+type SegmentMap map[int64]*Segment
+
 type SegmentLogStorage struct {
+	path          string
+	firstLogIndex int64 // atomic
+	lastLogIndex  int64 // atomic
+	mutex         sync.Mutex
+	segments      SegmentMap
+	openedSegment *Segment
+	checksumType  ChecksumType
+	enableSync    bool
+}
+
+func NewSegmentLogStorage(path string, enableSync bool) *SegmentLogStorage {
+	sls := &SegmentLogStorage{
+		path:          path,
+		firstLogIndex: 1,
+		lastLogIndex:  0,
+		checksumType:  ChecksumMurmurhash32,
+		segments:      make(SegmentMap, 0),
+		enableSync:    enableSync,
+	}
+	return sls
+}
+
+func (s *SegmentLogStorage) Init(manager *ConfigurationManager) {
+
+}
+
+func (s *SegmentLogStorage) FirstLogIndex() int64 {
+
+}
+
+func (s *SegmentLogStorage) LastLogIndex() int64 {
+
+}
+func (s *SegmentLogStorage) GetEntry(index int64) *LogEntry {
+
+}
+func (s *SegmentLogStorage) GetTerm(index int64) int64 {
+
+}
+func (s *SegmentLogStorage) AppendEntry(entry *LogEntry) error {
+
+}
+
+func (s *SegmentLogStorage) TruncatePrefix(firstIndexKept int64) error {
+
+}
+
+func (s *SegmentLogStorage) TruncateSuffix(lastIndexKept int64) error {
+
+}
+
+func (s *SegmentLogStorage) Reset(nextLogIndex int64) error {
+
+}
+
+func (s *SegmentLogStorage) NewInstance(uri string) LogStorage {
+
+}
+
+func (s *SegmentLogStorage) GCInstance(uri string) utils.Status {
+
+}
+
+func (s *SegmentLogStorage) Segments() SegmentMap {
+
+}
+
+func (s *SegmentLogStorage) ListFiles() []string {
+
+}
+
+func (s *SegmentLogStorage) Sync() {
+
+}
+
+func (s *SegmentLogStorage) openSegment() *Segment {
+
+}
+
+func (s *SegmentLogStorage) saveMeta(logIndex int64) error {
+
+}
+
+func (s *SegmentLogStorage) loadMeta() error {
+
+}
+
+func (s *SegmentLogStorage) listSegments(isEmpty bool) error {
+
+}
+
+func (s *SegmentLogStorage) loadSegments(manager *ConfigurationManager) error {
+
+}
+
+func (s *SegmentLogStorage) getSegment(logIndex int64) (*Segment, error) {
+
+}
+
+func (s *SegmentLogStorage) popSegments(firstIndexKept int64) []*Segment {
+
+}
+
+// popped []*Segment, lastSegment *Segment
+func (s *SegmentLogStorage) popSegmentsFromBack(lastIndexKept int64) ([]*Segment, *Segment) {
+
 }
 
 // util function

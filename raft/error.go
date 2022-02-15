@@ -5,5 +5,7 @@ import (
 )
 
 var (
-	errUnknownChecksumType = fmt.Errorf("err unknown checksum type")
+	errUnknownChecksumType = fmt.Errorf("unknown checksum type")
+	errInvalid             = fmt.Errorf("invalid argument")
+	errRange               = fmt.Errorf("result too large")
 )
