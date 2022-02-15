@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -156,7 +157,13 @@ func (s *Segment) Load(m *ConfigurationManager) error {
 	lastIndex := atomic.LoadInt64(&s.lastIndex)
 	if err == nil && !s.isOpen {
 		if actualLastIndex < lastIndex {
-			
+			log.Error("data lost in a full segment, path: %s, first_index: %d, expect_last_index: %d, actual_last_index: %d",
+				s.path, s.firstIndex, s.lastIndex, actualLastIndex)
+			return errors.New("data lost in a full segment")
+		} else {
+			log.Error("found garbage in a full segment, path: %s, first_index: %d, expect_last_index: %d, actual_last_index: %d",
+				s.path, s.firstIndex, s.lastIndex, actualLastIndex)
+			return errors.New("found garbage in a full segment")
 		}
 	}
 
@@ -170,17 +177,26 @@ func (s *Segment) Load(m *ConfigurationManager) error {
 
 	// truncate last uncompleted entry
 	if entryOff != fileSize {
-		log.Info("")
-		err = ftruncateUninterrupted()
+		log.Info("truncate last uncompleted write entry, path: %s, first_index: %d, old_size: %d, new_size: %d",
+			s.path, s.firstIndex, fileSize, entryOff)
+		err = s.file.Truncate(entryOff)
 	}
 
-	ret, err := s.file.Seek(entryOff, os.SEEK_SET)
+	_, _ = s.file.Seek(entryOff, io.SeekStart)
 
 	s.bytes = entryOff
 	return err
 }
 
-func (s *Segment) Append(entry *LogEntry) {}
+func (s *Segment) Append(entry *LogEntry)  {
+	if entry == nil || !s.isOpen {
+		return 
+	} else if entry.ID.Index != atomic.LoadInt64(&s.lastIndex)+1 {
+		log.Error("")
+		return 
+	}
+
+}
 
 func (s *Segment) Get(index int64) *LogEntry {
 	return nil
