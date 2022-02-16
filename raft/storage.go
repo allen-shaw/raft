@@ -110,7 +110,7 @@ type MetaStorage interface {
 	NewInstance(uri string) *MetaStorage
 	Create(uri string) *MetaStorage
 	GCInstance(uri string, vgid VersionedGroupId) error
-	Destory(uri string, vgid VersionedGroupId) error
+	Destroy(uri string, vgid VersionedGroupId) error
 }
 
 // Snapshot interface begin
@@ -152,5 +152,5 @@ type SnapshotStorage interface {
 	NewInstance(uri string) SnapshotStorage
 	Create(uri string) SnapshotStorage
 	GCInstance(uri string) error
-	Destory(uri string) error
+	Destroy(uri string) error
 }

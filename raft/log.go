@@ -265,8 +265,9 @@ func (s *Segment) Append(entry *LogEntry) error {
 		return err
 	}
 
-	toWrite := header.Len() + data.Len()
+	//toWrite := header.Len() + data.Len()
 
+	return nil
 }
 
 func (s *Segment) Get(index int64) *LogEntry {
@@ -467,48 +468,55 @@ func (s *SegmentLogStorage) Init(manager *ConfigurationManager) {
 }
 
 func (s *SegmentLogStorage) FirstLogIndex() int64 {
-
+	return 0
 }
 
 func (s *SegmentLogStorage) LastLogIndex() int64 {
-
+	return 0
 }
 func (s *SegmentLogStorage) GetEntry(index int64) *LogEntry {
+	return nil
 
 }
 func (s *SegmentLogStorage) GetTerm(index int64) int64 {
-
+	return 0
 }
 func (s *SegmentLogStorage) AppendEntry(entry *LogEntry) error {
+	return nil
 
 }
 
 func (s *SegmentLogStorage) TruncatePrefix(firstIndexKept int64) error {
+	return nil
 
 }
 
 func (s *SegmentLogStorage) TruncateSuffix(lastIndexKept int64) error {
+	return nil
 
 }
 
 func (s *SegmentLogStorage) Reset(nextLogIndex int64) error {
+	return nil
 
 }
 
 func (s *SegmentLogStorage) NewInstance(uri string) LogStorage {
-
+	return nil
 }
 
-func (s *SegmentLogStorage) GCInstance(uri string) utils.Status {
-
+func (s *SegmentLogStorage) GCInstance(uri string) error {
+	return nil
 }
 
 func (s *SegmentLogStorage) Segments() SegmentMap {
+	return nil
 
 }
 
 func (s *SegmentLogStorage) ListFiles() []string {
 
+	return nil
 }
 
 func (s *SegmentLogStorage) Sync() {
@@ -517,35 +525,43 @@ func (s *SegmentLogStorage) Sync() {
 
 func (s *SegmentLogStorage) openSegment() *Segment {
 
+	return nil
 }
 
 func (s *SegmentLogStorage) saveMeta(logIndex int64) error {
 
+	return nil
 }
 
 func (s *SegmentLogStorage) loadMeta() error {
 
+	return nil
 }
 
 func (s *SegmentLogStorage) listSegments(isEmpty bool) error {
 
+	return nil
 }
 
 func (s *SegmentLogStorage) loadSegments(manager *ConfigurationManager) error {
 
+	return nil
 }
 
 func (s *SegmentLogStorage) getSegment(logIndex int64) (*Segment, error) {
 
+	return nil, nil
 }
 
 func (s *SegmentLogStorage) popSegments(firstIndexKept int64) []*Segment {
 
+	return nil
 }
 
 // popped []*Segment, lastSegment *Segment
 func (s *SegmentLogStorage) popSegmentsFromBack(lastIndexKept int64) ([]*Segment, *Segment) {
 
+	return nil, nil
 }
 
 // util function
