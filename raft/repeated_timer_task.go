@@ -107,6 +107,9 @@ func (t *RepeatedTimerTask) Stop() {
 func (t *RepeatedTimerTask) Reset(timeoutMs int) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
+	if timeoutMs != 0 {
+		t.timeoutMs = timeoutMs
+	}
 	if t.stopped {
 		return
 	}
@@ -142,7 +145,7 @@ func (t *RepeatedTimerTask) Destroy() {
 
 func (t *RepeatedTimerTask) Describe() string {
 	t.mutex.Lock()
-	stoped := t.stopped
+	stopped := t.stopped
 	running := t.running
 	destroyed := t.destroyed
 	invoking := t.invoking
@@ -150,21 +153,21 @@ func (t *RepeatedTimerTask) Describe() string {
 	timeoutMs := t.timeoutMs
 	t.mutex.Unlock()
 
-	descrition := fmt.Sprintf("timeout(\"%v\"ms)", timeoutMs)
+	description := fmt.Sprintf("timeout(\"%v\"ms)", timeoutMs)
 	if destroyed {
-		descrition += " DESTROYED"
+		description += " DESTROYED"
 	}
-	if stoped {
-		descrition += " STOPPED"
+	if stopped {
+		description += " STOPPED"
 	}
 	if running {
 		if invoking {
-			descrition += " INVOKING"
+			description += " INVOKING"
 		} else {
-			descrition += fmt.Sprintf(" SCHEDULING(in \"%v\"ms", duetime)
+			description += fmt.Sprintf(" SCHEDULING(in \"%v\"ms", duetime)
 		}
 	}
-	return descrition
+	return description
 }
 
 func (t *RepeatedTimerTask) onTimeout() {
