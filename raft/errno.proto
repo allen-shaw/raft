@@ -34,6 +34,9 @@ enum RaftError {
     ENOMOREUSERLOG = 10015;
     // Raft node in readonly mode
     EREADONLY = 10016;
+
+
     EINVAL = 10022;
+    EPERM = 10023;
 };
 

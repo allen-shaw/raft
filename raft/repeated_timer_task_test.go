@@ -35,3 +35,7 @@ func TestTimer(t *testing.T) {
 	timer.Stop()
 	time.Sleep(10 * time.Second)
 }
+
+func TestPbClosure(t *testing.T) {
+
+}
