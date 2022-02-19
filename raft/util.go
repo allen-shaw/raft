@@ -45,3 +45,9 @@ func maxUint64(a, b uint64) uint64 {
 	}
 	return a
 }
+func maxInt64(a, b int64) int64 {
+	if a < b {
+		return b
+	}
+	return a
+}

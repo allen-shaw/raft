@@ -44,7 +44,7 @@ func (b *Ballot) Swap(rhs *Ballot) {
 	b.oldQuorum, rhs.oldQuorum = rhs.oldQuorum, b.oldQuorum
 }
 
-func (b *Ballot) Init(conf, oldConf *Configuration) {
+func (b *Ballot) Init(conf, oldConf *Configuration) error {
 	b.peers = make([]unfoundedPeerId, 0, conf.Size())
 	b.oldPeers = make([]unfoundedPeerId, 0)
 	b.quorum = 0
@@ -55,13 +55,14 @@ func (b *Ballot) Init(conf, oldConf *Configuration) {
 	}
 	b.quorum = len(b.peers)/2 + 1
 	if oldConf == nil {
-		return
+		return nil
 	}
 	b.oldPeers = make([]unfoundedPeerId, 0, oldConf.Size())
 	for oldPeer := range oldConf.peers {
 		b.oldPeers = append(b.oldPeers, *NewUnfoundedPeerId(&oldPeer))
 	}
 	b.oldQuorum = len(b.oldPeers)/2 + 1
+	return nil
 }
 
 func (b *Ballot) GrantWithPosHint(peer *PeerId, hint PosHint) PosHint {
