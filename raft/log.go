@@ -17,7 +17,7 @@ import (
 const (
 	RaftSegmentOpenPattern   = "log_inprogress_%020d"
 	RaftSegmentClosedPattern = "log_%020d_%020d"
-	RAFT_SEGMENT_META_FILE   = "log_meta"
+	RaftSegmentMetaFile      = "log_meta"
 
 	EntryHeaderSize uint64 = 24
 )
@@ -31,7 +31,7 @@ const (
 
 type entryHeader struct {
 	term         int64
-	entryType    int
+	entryType    EntryType
 	checksumType int
 	dataLen      uint64
 	dataChecksum uint32
@@ -53,7 +53,7 @@ type offsetAndTerm struct {
 	term   int64
 }
 
-//
+// Segment begin here
 type Segment struct {
 	path          string
 	bytes         int64
@@ -81,6 +81,7 @@ func NewSegment(path string, firstIndex, lastIndex int64, checksumType int) *Seg
 	return s
 }
 
+// Create create open segment
 func (s *Segment) Create() error {
 	if !s.isOpen {
 		log.Error("Check failed: Create on a closed segment at first_index=%v in %s", s.firstIndex, s.path)
@@ -140,8 +141,8 @@ func (s *Segment) Load(m *ConfigurationManager) error {
 			entry := NewLogEntry()
 			entry.ID.Index = i
 			entry.ID.Term = header.term
-			status := ParseConfigurationMeta(data, entry)
-			if status.OK() {
+			err = ParseConfigurationMeta(data, entry)
+			if err != nil {
 				confEntry := NewConfigurationEntry(entry)
 				m.Add(confEntry)
 			} else {
@@ -213,7 +214,7 @@ func (s *Segment) Append(entry *LogEntry) error {
 			}
 		}
 	case EntryType_ENTRY_TYPE_NO_OP:
-	// nothing
+	// do nothing
 	case EntryType_ENTRY_TYPE_CONFIGURATION:
 		{
 			var status utils.Status
@@ -229,7 +230,8 @@ func (s *Segment) Append(entry *LogEntry) error {
 	}
 
 	if uint64(data.Len()) >= (uint64(1) << 56) {
-
+		log.Error("invalid data len %d, large than max len %d", data.Len(), uint64(1)<<56)
+		return errors.New("invalid data len, too large")
 	}
 
 	header := bytes.NewBuffer(make([]byte, 0, EntryHeaderSize))
@@ -265,13 +267,69 @@ func (s *Segment) Append(entry *LogEntry) error {
 		return err
 	}
 
-	//toWrite := header.Len() + data.Len()
+	toWrite := header.Len() + data.Len()
+	n, err := s.file.Write(header.Bytes())
+	if err != nil || n != header.Len() {
+		log.Error("file [%s] write header fail, err %v, write len %d", s.path, err, n)
+		return fmt.Errorf("file write header fail %v", err)
+	}
+	n, err = s.file.Write(data.Bytes())
+	if err != nil {
+		log.Error("file [%s] write data fail, err %v, write len %d", s.path, err, n)
+		return fmt.Errorf("file write data fail %v", err)
+	}
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.offsetAndTerm = append(s.offsetAndTerm, offsetAndTerm{s.bytes, entry.ID.Term})
+	atomic.AddInt64(&s.lastIndex, 1)
+	s.bytes += int64(toWrite)
 
 	return nil
 }
 
-func (s *Segment) Get(index int64) *LogEntry {
-	return nil
+func (s *Segment) Get(index int64) (*LogEntry, error) {
+	meta, err := s.getMeta(index)
+	if err != nil {
+		log.Error("get meta fail, err: %v", err)
+		return nil, err
+	}
+
+	header := &entryHeader{}
+	data := bytes.NewBuffer(make([]byte, 0))
+	err = s.loadEntry(meta.offset, header, data, meta.length)
+	if err != nil {
+		log.Error("get meta fail, err: %v", err)
+		return nil, err
+	}
+	if meta.term != header.term {
+		log.Error("meta term=%d, header term=%d", meta.term, header.term)
+		return nil, errors.New("invalid segment term")
+	}
+	entry := NewLogEntry()
+	switch header.entryType {
+	case EntryType_ENTRY_TYPE_DATA:
+		entry.Data = *data
+	case EntryType_ENTRY_TYPE_NO_OP:
+		if data.Len() != 0 {
+			log.Error("data of NO_OP must be empty")
+			return nil, errors.New("NO_OP data not empty")
+		}
+	case EntryType_ENTRY_TYPE_CONFIGURATION:
+		err := ParseConfigurationMeta(data, entry)
+		if err != nil {
+			log.Warn("fail to parse ConfigurationPBMeta, path: %s, err %v", s.path, err)
+			return nil, err
+		}
+	default:
+		log.Error("unknown entry type %v, path: %s", header.entryType, s.path)
+		return nil, errors.New("unknown entry type")
+	}
+	entry.ID.Index = index
+	entry.ID.Term = header.term
+	entry.Type = header.entryType
+
+	return entry, nil
 }
 
 func (s *Segment) GetTerm(index int64) (int64, error) {
@@ -282,7 +340,11 @@ func (s *Segment) GetTerm(index int64) (int64, error) {
 	return meta.term, nil
 }
 
-func (s *Segment) Close(sync bool) {}
+func (s *Segment) Close(sync bool) {
+	if !s.isOpen {
+
+	}
+}
 
 func (s *Segment) Sync(sync bool) error {
 	if s.lastIndex > s.firstIndex && sync {
@@ -318,6 +380,7 @@ func (s *Segment) FileName() string {
 	return fmt.Sprintf(RaftSegmentOpenPattern, s.firstIndex)
 }
 
+// TODO: 入参可以优化一下 loadEntry(offset int64, sizeHint uint64) (head *entryHeader, data *bytes.Buffer, err error)
 func (s *Segment) loadEntry(offset int64, head *entryHeader, data *bytes.Buffer, sizeHint uint64) error {
 	var buf bytes.Buffer
 	toRead := maxUint64(sizeHint, EntryHeaderSize)
@@ -343,7 +406,7 @@ func (s *Segment) loadEntry(offset int64, head *entryHeader, data *bytes.Buffer,
 
 	tmp := entryHeader{
 		term:         int64(term),
-		entryType:    int(metaField >> 24),
+		entryType:    EntryType(metaField >> 24),
 		checksumType: int((metaField << 8) >> 24),
 		dataLen:      uint64(dataLen),
 		dataChecksum: dataChecksum,
@@ -437,7 +500,7 @@ func (s *Segment) String() string {
 	return ""
 }
 
-// SegmentLogStorage implement LogStorage
+// SegmentMap SegmentLogStorage implement LogStorage
 type SegmentMap map[int64]*Segment
 
 type SegmentLogStorage struct {

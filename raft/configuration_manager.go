@@ -48,7 +48,7 @@ func (c *ConfigurationEntry) String() string {
 	return buf.String()
 }
 
-// Manager the history of configuration changing
+// ConfigurationManager Manager the history of configuration changing
 type ConfigurationManager struct {
 	configurations []*ConfigurationEntry // deque<ConfigurationEntry>
 	snapshot       *ConfigurationEntry
@@ -66,7 +66,7 @@ func (m *ConfigurationManager) Add(entry *ConfigurationEntry) error {
 	return nil
 }
 
-//  [1, first_index_kept) are being discarded
+// TruncatePrefix [1, first_index_kept) are being discarded
 func (m *ConfigurationManager) TruncatePrefix(firstIndexKept int64) {
 	var idx int
 	for i, c := range m.configurations { // TODO: 可以使用二分查找？
@@ -78,7 +78,7 @@ func (m *ConfigurationManager) TruncatePrefix(firstIndexKept int64) {
 	m.configurations = m.configurations[idx:]
 }
 
-// (last_index_kept, infinity) are being discarded
+// TruncateSuffix (last_index_kept, infinity) are being discarded
 func (m *ConfigurationManager) TruncateSuffix(lastIndexKept int64) {
 	var idx int
 	for i, c := range m.configurations {

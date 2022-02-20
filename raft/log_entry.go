@@ -3,6 +3,7 @@ package raft
 import (
 	"bytes"
 	"fmt"
+	"github.com/AllenShaw19/raft/log"
 
 	"github.com/AllenShaw19/raft/utils"
 	"google.golang.org/protobuf/proto"
@@ -50,15 +51,13 @@ func NewLogEntry() *LogEntry {
 	}
 }
 
-func ParseConfigurationMeta(data *bytes.Buffer, entry *LogEntry) utils.Status {
-	var (
-		status utils.Status
-		meta   ConfigurationPBMeta
-	)
+func ParseConfigurationMeta(data *bytes.Buffer, entry *LogEntry) error {
+	var meta ConfigurationPBMeta
+
 	err := proto.Unmarshal(data.Bytes(), &meta)
 	if err != nil {
-		status.SetError(int32(RaftError_EINVAL), "Fail to parse ConfigurationPBMeta")
-		return status
+		log.Error("meta unmarshal fail %v", err)
+		return err
 	}
 	for _, peer := range meta.Peers {
 		entry.Peers = append(entry.Peers, NewPeerId(peer))
@@ -66,7 +65,7 @@ func ParseConfigurationMeta(data *bytes.Buffer, entry *LogEntry) utils.Status {
 	for _, peer := range meta.OldPeers {
 		entry.OldPeers = append(entry.OldPeers, NewPeerId(peer))
 	}
-	return status
+	return nil
 }
 
 func SerializeConfigurationMeta(entry *LogEntry) (*bytes.Buffer, utils.Status) {
