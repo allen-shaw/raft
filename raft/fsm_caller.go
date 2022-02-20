@@ -1,5 +1,8 @@
 package raft
 
+type IteratorImpl struct {
+}
+
 type FSMCaller struct {
 }
 
