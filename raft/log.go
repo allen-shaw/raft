@@ -374,6 +374,10 @@ func (s *Segment) Sync(sync bool) error {
 	return nil
 }
 
+func (s *Segment) RunUnlink() {
+
+}
+
 func (s *Segment) Unlink() {}
 
 func (s *Segment) Truncate(lastIndexKept int64) {}
