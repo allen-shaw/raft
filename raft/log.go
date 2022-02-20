@@ -14,6 +14,10 @@ import (
 	"github.com/AllenShaw19/raft/utils"
 )
 
+var (
+	FlagsRaftSyncSegments bool
+)
+
 const (
 	RaftSegmentOpenPattern   = "log_inprogress_%020d"
 	RaftSegmentClosedPattern = "log_%020d_%020d"
@@ -340,15 +344,32 @@ func (s *Segment) GetTerm(index int64) (int64, error) {
 	return meta.term, nil
 }
 
-func (s *Segment) Close(sync bool) {
+func (s *Segment) Close(sync bool) error {
 	if !s.isOpen {
-
+		log.Fatal("segment is not open")
 	}
+	oldPath := filepath.Join(s.path, fmt.Sprintf(RaftSegmentOpenPattern, s.firstIndex))
+	newPath := filepath.Join(s.path, fmt.Sprintf(RaftSegmentClosedPattern, s.firstIndex, atomic.LoadInt64(&s.lastIndex)))
+
+	log.Info("close a full segment. Current first_index: %v, last_index: %v, raft_sync_segments: %v, will_sync: %v, path: %v",
+		s.firstIndex, s.lastIndex, FlagsRaftSyncSegments, sync, newPath)
+
+	err := s.Sync(FlagsRaftSyncSegments && sync)
+	if err == nil {
+		s.isOpen = false
+		err = os.Rename(oldPath, newPath)
+		if err != nil {
+			log.Error("fail to rename %s to %s", oldPath, newPath)
+		} else {
+			log.Info("rename %s to %s", oldPath, newPath)
+		}
+	}
+	return err
 }
 
 func (s *Segment) Sync(sync bool) error {
 	if s.lastIndex > s.firstIndex && sync {
-		s.file.Sync()
+		return s.file.Sync()
 	}
 	return nil
 }
