@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package raft;
+option go_package = "github.com/AllenShaw19/raft/raft;raft";
+
+message GetFileRequest {
+  int64 reader_id = 1;
+  string filename = 2;
+  int64 count = 3;
+  int64 offset = 4;
+  optional bool read_partly = 5;
+}
+
+message GetFileResponse {
+  // Data is in attachment
+  bool eof = 1;
+  optional int64 read_size = 2;
+}
+
+service FileService {
+  rpc GetFile(GetFileRequest) returns (GetFileResponse) {}
+}

@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package raft;
+option go_package = "github.com/AllenShaw19/raft/raft;raft";
+
+message AddPeerRequest {
+  string group_id = 1;
+  string leader_id = 2;
+  string peer_id = 3;
+}
+
+message AddPeerResponse {
+  repeated string old_peers = 1;
+  repeated string new_peers = 2;
+}
+
+message RemovePeerRequest {
+  string group_id = 1;
+  string leader_id = 2;
+  string peer_id = 3;
+}
+
+message RemovePeerResponse {
+  repeated string old_peers = 1;
+  repeated string new_peers = 2;
+}
+
+message ChangePeersRequest {
+  string group_id = 1;
+  string leader_id = 2;
+  repeated string new_peers = 3;
+}
+
+message ChangePeersResponse {
+  repeated string old_peers = 1;
+  repeated string new_peers = 2;
+}
+
+message SnapshotRequest {
+  string group_id = 1;
+  optional string peer_id = 2;
+};
+
+message ResetPeerRequest {
+  string group_id = 1;
+  string peer_id = 2;
+  repeated string old_peers = 3;
+  repeated string new_peers = 4;
+}
+
+message TransferLeaderRequest {
+  string group_id = 1;
+  string leader_id = 2;
+  optional string peer_id = 3;
+}
+
+message TransferLeaderResponse {}
+
+message ResetPeerResponse {}
+
+message SnapshotResponse {}
+
+message GetLeaderRequest {
+  string group_id = 1;
+  optional string peer_id = 2;
+}
+
+message GetLeaderResponse {
+   string leader_id = 1;
+}
+
+// service
+service CliService {
+  rpc AddPeer(AddPeerRequest) returns (AddPeerResponse) {}
+  rpc RemovePeer(RemovePeerRequest) returns (RemovePeerResponse) {}
+  rpc ChangePeers(ChangePeersRequest) returns (ChangePeersResponse) {}
+  rpc ResetPeer(ResetPeerRequest) returns (ResetPeerResponse) {}
+  rpc Snapshot(SnapshotRequest) returns (SnapshotResponse) {}
+  rpc GetLeader(GetLeaderRequest) returns (GetLeaderResponse) {}
+  rpc TransferLeader(TransferLeaderRequest) returns (TransferLeaderResponse) {}
+}

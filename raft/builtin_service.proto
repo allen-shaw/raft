@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package raft;
+option go_package = "github.com/AllenShaw19/raft/raft;raft";
+
+message IndexRequest {};
+message IndexResponse {};
+
+service RaftStat {
+  rpc DefaultMethod(IndexRequest) returns (IndexResponse) {}
+}
