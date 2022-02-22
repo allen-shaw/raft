@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/AllenShaw19/raft/log"
 	"github.com/AllenShaw19/raft/utils"
@@ -374,13 +375,73 @@ func (s *Segment) Sync(sync bool) error {
 	return nil
 }
 
-func (s *Segment) RunUnlink() {
-
+func (s *Segment) runUnlink(filepath string) {
+	start := time.Now()
+	err := os.Remove(filepath)
+	durationMs := time.Since(start).Milliseconds()
+	if err != nil {
+		log.Error("unlink %s err %v time: %d ms", filepath, err, durationMs)
+		return
+	}
+	log.Info("unlink %s success, time: %d ms", filepath, durationMs)
 }
 
-func (s *Segment) Unlink() {}
+func (s *Segment) Unlink() error {
+	path := s.path
+	if s.isOpen {
+		path = filepath.Join(path, fmt.Sprintf(RaftSegmentOpenPattern, s.firstIndex))
+	} else {
+		path = filepath.Join(path, fmt.Sprintf(RaftSegmentClosedPattern, s.firstIndex, atomic.LoadInt64(&s.lastIndex)))
+	}
+	tmpPath := path + ".tmp"
+	err := os.Rename(path, tmpPath)
+	if err != nil {
+		log.Error("Fail to rename %s to %s", path, tmpPath)
+		return err
+	}
+	// start goroutine to unlink
+	go s.runUnlink(tmpPath)
+	log.Info("Unlinked segment %s", path)
+	return nil
+}
 
-func (s *Segment) Truncate(lastIndexKept int64) {}
+func (s *Segment) Truncate(lastIndexKept int64) error {
+
+	s.mutex.Lock()
+	if lastIndexKept >= s.lastIndex {
+		s.mutex.Unlock()
+		return nil
+	}
+
+	firstTruncateInOffset := lastIndexKept + 1 - s.firstIndex
+	truncateSize := s.offsetAndTerm[firstTruncateInOffset].offset
+	log.Info("Truncating %s, firstIndex %v lastIndex from %v to %v, truncate size to %v",
+		s.path, s.firstIndex, s.lastIndex, lastIndexKept, truncateSize)
+	s.mutex.Unlock()
+
+	if !s.isOpen {
+
+	}
+
+	err := s.file.Truncate(truncateSize)
+	if err != nil {
+		log.Error("file truncate fail, err %v", err)
+		return err
+	}
+
+	retOff, err := s.file.Seek(truncateSize, io.SeekStart)
+	if err != nil {
+		log.Error("fail to seek file path %s to size=%v, err %v, ret %d", s.path, truncateSize, err, retOff)
+		return err
+	}
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.offsetAndTerm = s.offsetAndTerm[:firstTruncateInOffset]
+	atomic.StoreInt64(&s.lastIndex, lastIndexKept)
+	s.bytes = truncateSize
+	return nil
+}
 
 func (s *Segment) IsOpen() bool {
 	return s.isOpen
@@ -516,15 +577,6 @@ func (s *Segment) getMeta(index int64) (*logMeta, error) {
 	return meta, nil
 }
 
-func (s *Segment) truncateMetaAndGetLast(last int64) int {
-
-	return 0
-}
-
-func (s *Segment) String() string {
-	return ""
-}
-
 // SegmentMap SegmentLogStorage implement LogStorage
 type SegmentMap map[int64]*Segment
 
@@ -656,9 +708,9 @@ func (s *SegmentLogStorage) popSegmentsFromBack(lastIndexKept int64) ([]*Segment
 func verifyChecksum(checksumType int, data []byte, value uint32) bool {
 	switch ChecksumType(checksumType) {
 	case ChecksumMurmurhash32:
-		return (value == murmurhash32(data))
+		return value == murmurhash32(data)
 	case ChecksumCrc32:
-		return (value == crc32(data))
+		return value == crc32(data)
 	default:
 		log.Error("Unknown checksum type=%v", checksumType)
 		return false
