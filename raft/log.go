@@ -16,7 +16,8 @@ import (
 )
 
 var (
-	FlagsRaftSyncSegments bool
+	FlagsRaftSyncSegments   bool
+	FlagsRaftMaxSegmentSize int64
 )
 
 const (
@@ -37,7 +38,7 @@ const (
 type entryHeader struct {
 	term         int64
 	entryType    EntryType
-	checksumType int
+	checksumType ChecksumType
 	dataLen      uint64
 	dataChecksum uint32
 }
@@ -67,11 +68,11 @@ type Segment struct {
 	isOpen        bool
 	firstIndex    int64
 	lastIndex     int64 // should be atomic
-	checksumType  int
+	checksumType  ChecksumType
 	offsetAndTerm []offsetAndTerm
 }
 
-func NewSegment(path string, firstIndex, lastIndex int64, checksumType int) *Segment {
+func NewSegment(path string, firstIndex, lastIndex int64, checksumType ChecksumType) *Segment {
 	s := &Segment{}
 	s.path = path
 	s.bytes = 0
@@ -493,7 +494,7 @@ func (s *Segment) loadEntry(offset int64, head *entryHeader, data *bytes.Buffer,
 	tmp := entryHeader{
 		term:         int64(term),
 		entryType:    EntryType(metaField >> 24),
-		checksumType: int((metaField << 8) >> 24),
+		checksumType: ChecksumType((metaField << 8) >> 24),
 		dataLen:      uint64(dataLen),
 		dataChecksum: dataChecksum,
 	}
@@ -603,27 +604,102 @@ func NewSegmentLogStorage(path string, enableSync bool) *SegmentLogStorage {
 	return sls
 }
 
-func (s *SegmentLogStorage) Init(manager *ConfigurationManager) {
+func (s *SegmentLogStorage) Init(manager *ConfigurationManager) error {
+	if FlagsRaftMaxSegmentSize < 0 {
+		log.Fatal("FlagsRaftMaxSegmentSize %d must be greater than or equal to 0", FlagsRaftMaxSegmentSize)
+		return errors.New("invalid raft max segment size")
+	}
+	dirPath := filepath.Dir(s.path)
+	err := os.MkdirAll(dirPath, os.ModePerm)
+	if err != nil {
+		log.Error("Fail to create %s : %v", dirPath, err)
+		return err
+	}
 
+	// default use crc32 checksum
+	s.checksumType = ChecksumCrc32
+	log.Info("Use crc32c as the checksum type of appending entries")
+
+	isEmpty := false
+
+	defer func() {
+		if isEmpty {
+			atomic.StoreInt64(&s.firstLogIndex, 1)
+			atomic.StoreInt64(&s.lastLogIndex, 0)
+			err = s.saveMeta(1)
+		}
+	}()
+
+	err = s.loadMeta()
+	if err != nil && err == errNoEntry {
+		log.Warn("%s is empty", s.path)
+		isEmpty = true
+	} else if err != nil {
+		return err
+	}
+
+	err = s.listSegments(isEmpty)
+	if err != nil {
+		return err
+	}
+
+	err = s.loadSegments(manager)
+	if err != nil {
+		return err
+	}
+
+	return err
 }
 
 func (s *SegmentLogStorage) FirstLogIndex() int64 {
-	return 0
+	return atomic.LoadInt64(&s.firstLogIndex)
 }
 
 func (s *SegmentLogStorage) LastLogIndex() int64 {
-	return 0
+	return atomic.LoadInt64(&s.lastLogIndex)
 }
-func (s *SegmentLogStorage) GetEntry(index int64) *LogEntry {
-	return nil
 
+func (s *SegmentLogStorage) GetEntry(index int64) (*LogEntry, error) {
+	segment, err := s.getSegment(index)
+	if err != nil {
+		log.Error("get segment fail, index %d, err %v", index, err)
+		return nil, err
+	}
+	return segment.Get(index)
 }
-func (s *SegmentLogStorage) GetTerm(index int64) int64 {
-	return 0
+
+func (s *SegmentLogStorage) GetTerm(index int64) (int64, error) {
+	segment, err := s.getSegment(index)
+	if err != nil {
+		log.Error("get segment fail, index %d, err %v", index, err)
+		return 0, err
+	}
+	return segment.GetTerm(index)
 }
 func (s *SegmentLogStorage) AppendEntry(entry *LogEntry) error {
-	return nil
+	segment := s.openSegment()
+	if segment == nil {
+		return errIO
+	}
+	err := segment.Append(entry)
+	if err != nil /*&& !errors.Is(err, EEXIST)*/ { // FIXME:处理文件已存在的错误
+		return err
+	}
 
+	term, err := s.GetTerm(entry.ID.Index)
+	if err != nil {
+		return err
+	}
+	if /** errors.Is(err, EEXIST) && */ entry.ID.Term != term {
+		return errInvalid
+	}
+	atomic.AddInt64(&s.lastLogIndex, 1)
+	return segment.Sync(s.enableSync)
+}
+
+func (s *SegmentLogStorage) AppendEntries(entries []*LogEntry, metric *IOMetric) (int, error) {
+
+	return 0, nil
 }
 
 func (s *SegmentLogStorage) TruncatePrefix(firstIndexKept int64) error {
@@ -632,8 +708,8 @@ func (s *SegmentLogStorage) TruncatePrefix(firstIndexKept int64) error {
 }
 
 func (s *SegmentLogStorage) TruncateSuffix(lastIndexKept int64) error {
-	return nil
 
+	return nil
 }
 
 func (s *SegmentLogStorage) Reset(nextLogIndex int64) error {
@@ -664,8 +740,43 @@ func (s *SegmentLogStorage) Sync() {
 }
 
 func (s *SegmentLogStorage) openSegment() *Segment {
+	var prevOpenSegment *Segment
 
-	return nil
+	s.mutex.Lock()
+	if s.openedSegment == nil {
+		s.openedSegment = NewSegment(s.path, s.LastLogIndex()+1, s.LastLogIndex(), s.checksumType)
+		if err := s.openedSegment.Create(); err != nil {
+			s.openedSegment = nil
+			s.mutex.Unlock()
+			return nil
+		}
+	}
+	if s.openedSegment.Bytes() > FlagsRaftMaxSegmentSize {
+		s.segments[s.openedSegment.FirstIndex()] = s.openedSegment
+		prevOpenSegment, s.openedSegment = s.openedSegment, prevOpenSegment // swap
+	}
+	s.mutex.Unlock()
+
+	if prevOpenSegment != nil {
+		if err := prevOpenSegment.Close(s.enableSync); err == nil {
+			s.mutex.Lock()
+			s.openedSegment = NewSegment(s.path, s.LastLogIndex()+1, s.LastLogIndex(), s.checksumType)
+			if err := s.openedSegment.Create(); err == nil {
+				// success
+				s.mutex.Unlock()
+				return s.openedSegment
+			}
+			s.mutex.Unlock()
+		}
+		log.Error("Fail to close old open_segment or create new open_segment, path: %s", s.path)
+		// Failed, revert former changes
+		s.mutex.Lock()
+		delete(s.segments, prevOpenSegment.FirstIndex())
+		s.openedSegment, prevOpenSegment = prevOpenSegment, s.openedSegment
+		s.mutex.Unlock()
+		return nil
+	}
+	return s.openedSegment
 }
 
 func (s *SegmentLogStorage) saveMeta(logIndex int64) error {
@@ -705,8 +816,8 @@ func (s *SegmentLogStorage) popSegmentsFromBack(lastIndexKept int64) ([]*Segment
 }
 
 // util function
-func verifyChecksum(checksumType int, data []byte, value uint32) bool {
-	switch ChecksumType(checksumType) {
+func verifyChecksum(checksumType ChecksumType, data []byte, value uint32) bool {
+	switch checksumType {
 	case ChecksumMurmurhash32:
 		return value == murmurhash32(data)
 	case ChecksumCrc32:
@@ -717,8 +828,8 @@ func verifyChecksum(checksumType int, data []byte, value uint32) bool {
 	}
 }
 
-func getChecksum(checksumType int, data []byte) (uint32, error) {
-	switch ChecksumType(checksumType) {
+func getChecksum(checksumType ChecksumType, data []byte) (uint32, error) {
+	switch checksumType {
 	case ChecksumMurmurhash32:
 		return murmurhash32(data), nil
 	case ChecksumCrc32:
