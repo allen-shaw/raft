@@ -46,8 +46,8 @@ type LogStorage interface {
 	Init(manager *ConfigurationManager) error
 	FirstLogIndex() int64
 	LastLogIndex() int64
-	GetEntry(index int64) *LogEntry
-	GetTerm(index int64) int64
+	GetEntry(index int64) (*LogEntry, error)
+	GetTerm(index int64) (int64, error)
 	AppendEntry(entry *LogEntry) error
 	AppendEntries(entries []*LogEntry, metric *IOMetric) (int, error)
 
@@ -61,7 +61,6 @@ type LogStorage interface {
 	Reset(nextLogIndex int64) error
 
 	GCInstance(uri string) utils.Status
-	Destroy(uri string) utils.Status
 }
 
 func CreateLogStorage(uri string) LogStorage {

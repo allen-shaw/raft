@@ -16,14 +16,17 @@ import (
 )
 
 var (
-	FlagsRaftSyncSegments   bool
-	FlagsRaftMaxSegmentSize int64
+	FlagsRaftSyncSegments            bool
+	FlagsRaftMaxSegmentSize          int64
+	FlagsRaftSync                    bool
+	FlagsRaftSyncMeta                bool
+	FlagsRaftTraceAppendEntryLatency bool
 )
 
 const (
-	RaftSegmentOpenPattern   = "log_inprogress_%020d"
-	RaftSegmentClosedPattern = "log_%020d_%020d"
-	RaftSegmentMetaFile      = "log_meta"
+	SegmentOpenPattern   = "log_inprogress_%020d"
+	SegmentClosedPattern = "log_%020d_%020d"
+	SegmentMetaFile      = "log_meta"
 
 	EntryHeaderSize uint64 = 24
 )
@@ -93,7 +96,7 @@ func (s *Segment) Create() error {
 		log.Error("Check failed: Create on a closed segment at first_index=%v in %s", s.firstIndex, s.path)
 		return fmt.Errorf("fail to create on a closed segment")
 	}
-	path := filepath.Join(s.path, fmt.Sprintf(RaftSegmentOpenPattern, s.firstIndex))
+	path := filepath.Join(s.path, fmt.Sprintf(SegmentOpenPattern, s.firstIndex))
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		log.Error("Fail to open file %s", path)
@@ -108,9 +111,9 @@ func (s *Segment) Load(m *ConfigurationManager) error {
 	var err error
 	path := s.path
 	if s.isOpen {
-		path = filepath.Join(path, fmt.Sprintf(RaftSegmentOpenPattern, s.firstIndex))
+		path = filepath.Join(path, fmt.Sprintf(SegmentOpenPattern, s.firstIndex))
 	} else {
-		path = filepath.Join(path, fmt.Sprintf(RaftSegmentClosedPattern, s.firstIndex, atomic.LoadInt64(&s.lastIndex)))
+		path = filepath.Join(path, fmt.Sprintf(SegmentClosedPattern, s.firstIndex, atomic.LoadInt64(&s.lastIndex)))
 	}
 
 	f, err := os.OpenFile(path, os.O_RDWR, 0644)
@@ -350,8 +353,8 @@ func (s *Segment) Close(sync bool) error {
 	if !s.isOpen {
 		log.Fatal("segment is not open")
 	}
-	oldPath := filepath.Join(s.path, fmt.Sprintf(RaftSegmentOpenPattern, s.firstIndex))
-	newPath := filepath.Join(s.path, fmt.Sprintf(RaftSegmentClosedPattern, s.firstIndex, atomic.LoadInt64(&s.lastIndex)))
+	oldPath := filepath.Join(s.path, fmt.Sprintf(SegmentOpenPattern, s.firstIndex))
+	newPath := filepath.Join(s.path, fmt.Sprintf(SegmentClosedPattern, s.firstIndex, atomic.LoadInt64(&s.lastIndex)))
 
 	log.Info("close a full segment. Current first_index: %v, last_index: %v, raft_sync_segments: %v, will_sync: %v, path: %v",
 		s.firstIndex, s.lastIndex, FlagsRaftSyncSegments, sync, newPath)
@@ -390,9 +393,9 @@ func (s *Segment) runUnlink(filepath string) {
 func (s *Segment) Unlink() error {
 	path := s.path
 	if s.isOpen {
-		path = filepath.Join(path, fmt.Sprintf(RaftSegmentOpenPattern, s.firstIndex))
+		path = filepath.Join(path, fmt.Sprintf(SegmentOpenPattern, s.firstIndex))
 	} else {
-		path = filepath.Join(path, fmt.Sprintf(RaftSegmentClosedPattern, s.firstIndex, atomic.LoadInt64(&s.lastIndex)))
+		path = filepath.Join(path, fmt.Sprintf(SegmentClosedPattern, s.firstIndex, atomic.LoadInt64(&s.lastIndex)))
 	}
 	tmpPath := path + ".tmp"
 	err := os.Rename(path, tmpPath)
@@ -462,9 +465,9 @@ func (s *Segment) LastIndex() int64 {
 
 func (s *Segment) FileName() string {
 	if !s.isOpen {
-		return fmt.Sprintf(RaftSegmentClosedPattern, s.firstIndex, atomic.LoadInt64(&s.lastIndex))
+		return fmt.Sprintf(SegmentClosedPattern, s.firstIndex, atomic.LoadInt64(&s.lastIndex))
 	}
-	return fmt.Sprintf(RaftSegmentOpenPattern, s.firstIndex)
+	return fmt.Sprintf(SegmentOpenPattern, s.firstIndex)
 }
 
 // TODO: 入参可以优化一下 loadEntry(offset int64, sizeHint uint64) (head *entryHeader, data *bytes.Buffer, err error)
@@ -698,31 +701,148 @@ func (s *SegmentLogStorage) AppendEntry(entry *LogEntry) error {
 }
 
 func (s *SegmentLogStorage) AppendEntries(entries []*LogEntry, metric *IOMetric) (int, error) {
+	if len(entries) == 0 {
+		return 0, nil
+	}
+	if lastLogIndex := atomic.LoadInt64(&s.lastLogIndex); lastLogIndex+1 != entries[0].ID.Index {
+		log.Fatal("There's gap between appending entries and last_log_index, path %s", s.path)
+		return -1, errors.New("")
+	}
 
-	return 0, nil
+	var lastSegment *Segment
+	for i, entry := range entries {
+		segment := s.openSegment()
+		if FlagsRaftTraceAppendEntryLatency && metric != nil {
+			//	TODO: 增加metric
+		}
+		if segment == nil {
+			return i, errors.New("nil segment")
+		}
+		err := segment.Append(entry)
+		if err != nil {
+			return i, err
+		}
+		if FlagsRaftTraceAppendEntryLatency && metric != nil {
+			//	TODO: 增加metric
+		}
+		atomic.AddInt64(&s.lastLogIndex, 1)
+		lastSegment = segment
+	}
+
+	err := lastSegment.Sync(s.enableSync)
+	if err != nil {
+		return len(entries), err
+	}
+
+	if FlagsRaftTraceAppendEntryLatency && metric != nil {
+		//	TODO: 增加metric
+	}
+
+	return len(entries), nil
 }
 
 func (s *SegmentLogStorage) TruncatePrefix(firstIndexKept int64) error {
+	if atomic.LoadInt64(&s.firstLogIndex) >= firstIndexKept {
+		log.Info("nothing is going to happen since first_log_index=%v >= first_index_kept=%v", s.firstLogIndex, firstIndexKept)
+		return nil
+	}
+	if err := s.saveMeta(firstIndexKept); err != nil {
+		log.Error("Fail to save meta, path: %s", s.path)
+		return err
+	}
+	poppedSegments := s.popSegments(firstIndexKept)
+	for i := range poppedSegments {
+		poppedSegments[i].Unlink()
+		poppedSegments[i] = nil
+	}
 	return nil
-
 }
 
 func (s *SegmentLogStorage) TruncateSuffix(lastIndexKept int64) error {
+	popped, lastSegment := s.popSegmentsFromBack(lastIndexKept)
 
-	return nil
+	truncateLastSegment := false
+	var err error
+	if lastSegment != nil {
+		if s.firstLogIndex <= s.lastLogIndex {
+			truncateLastSegment = true
+		} else {
+			s.mutex.Lock()
+			popped = append(popped, lastSegment)
+			delete(s.segments, lastSegment.FirstIndex())
+			if s.openedSegment != nil {
+				if s.openedSegment != lastSegment {
+					log.Fatal("Check failed: openedSegment != lastSegment")
+				}
+				s.openedSegment = nil
+			}
+			s.mutex.Unlock()
+		}
+	}
+
+	for i := range popped {
+		err = popped[i].Unlink()
+		if err != nil {
+			return err
+		}
+		popped[i] = nil
+	}
+
+	if truncateLastSegment {
+		closed := !lastSegment.IsOpen()
+		err = lastSegment.Truncate(lastIndexKept)
+		if err == nil && closed && lastSegment.IsOpen() {
+			s.mutex.Lock()
+			if s.openedSegment != nil {
+				log.Fatal("check failed：openedSegment not nil")
+			}
+			delete(s.segments, lastSegment.FirstIndex())
+			s.openedSegment, lastSegment = lastSegment, s.openedSegment
+			s.mutex.Unlock()
+		}
+	}
+
+	return err
 }
 
 func (s *SegmentLogStorage) Reset(nextLogIndex int64) error {
-	return nil
+	if nextLogIndex <= 0 {
+		log.Error("invalid next_log_index=%d, path: %s", nextLogIndex, s.path)
+		return errInvalid
+	}
 
+	popped := make([]*Segment, 0, len(s.segments))
+	s.mutex.Lock()
+	for _, segment := range s.segments {
+		popped = append(popped, segment)
+	}
+	s.segments = make(SegmentMap)
+	if s.openedSegment != nil {
+		popped = append(popped, s.openedSegment)
+		s.openedSegment = nil
+	}
+	atomic.StoreInt64(&s.firstLogIndex, nextLogIndex)
+	atomic.StoreInt64(&s.lastLogIndex, nextLogIndex-1)
+	s.mutex.Unlock()
+
+	if err := s.saveMeta(nextLogIndex); err != nil {
+		log.Error("Fail to save meta, path: %s", s.path)
+		return err
+	}
+
+	for i := range popped {
+		popped[i].Unlink()
+		popped[i] = nil
+	}
+	return nil
 }
 
 func (s *SegmentLogStorage) NewInstance(uri string) LogStorage {
-	return nil
+	return NewSegmentLogStorage(uri, true)
 }
 
-func (s *SegmentLogStorage) GCInstance(uri string) error {
-	return nil
+func (s *SegmentLogStorage) GCInstance(uri string) utils.Status {
+	return utils.Status{}
 }
 
 func (s *SegmentLogStorage) Segments() SegmentMap {
@@ -780,12 +900,34 @@ func (s *SegmentLogStorage) openSegment() *Segment {
 }
 
 func (s *SegmentLogStorage) saveMeta(logIndex int64) error {
+	start := time.Now()
+	metaPath := filepath.Join(s.path, SegmentMetaFile)
 
-	return nil
+	meta := &LogPBMeta{FirstLogIndex: logIndex}
+	pbFile := ProtoBufFile{path: metaPath}
+
+	err := pbFile.Save(meta, syncMeta())
+	if err != nil {
+		log.Error("Fail to save meta to %s", metaPath)
+	}
+	log.Info("log save_meta %s first_log_index: %v, time: %dms", metaPath, logIndex, time.Since(start).Milliseconds())
+	return err
 }
 
 func (s *SegmentLogStorage) loadMeta() error {
+	start := time.Now()
+	metaPath := filepath.Join(s.path, SegmentMetaFile)
 
+	meta := &LogPBMeta{}
+	pbFile := ProtoBufFile{path: metaPath}
+	err := pbFile.Load(meta)
+	if err != nil {
+		log.Error("Fail to load meta from %s", metaPath)
+		return err
+	}
+	atomic.StoreInt64(&s.firstLogIndex, meta.FirstLogIndex)
+
+	log.Info("log load_meta %s first_log_index: %v, time: %dms", metaPath, meta.FirstLogIndex, time.Since(start).Milliseconds())
 	return nil
 }
 
@@ -838,4 +980,8 @@ func getChecksum(checksumType ChecksumType, data []byte) (uint32, error) {
 		log.Error("Unknown checksum type=%v", checksumType)
 		return 0, errUnknownChecksumType
 	}
+}
+
+func syncMeta() bool {
+	return FlagsRaftSync || FlagsRaftSyncMeta
 }
