@@ -10,13 +10,32 @@ import (
 
 type RawPacker struct {
 	stream *bytes.Buffer
+	err    error
 }
 
 func NewRawPacker(stream *bytes.Buffer) *RawPacker {
 	return &RawPacker{stream: stream}
 }
 
-func (p *RawPacker) Pack32(hostValue uint32) error {
+func (p *RawPacker) Pack32(hostValue uint32) *RawPacker {
+	if p.err == nil {
+		p.err = p.pack32(hostValue)
+	}
+	return p
+}
+
+func (p *RawPacker) Pack64(hostValue uint64) *RawPacker {
+	if p.err == nil {
+		p.err = p.pack64(hostValue)
+	}
+	return p
+}
+
+func (p *RawPacker) Error() error {
+	return p.err
+}
+
+func (p *RawPacker) pack32(hostValue uint32) error {
 	b := make([]byte, 4)
 	binary.LittleEndian.PutUint32(b, hostValue)
 	n, err := p.stream.Write(b)
@@ -27,7 +46,7 @@ func (p *RawPacker) Pack32(hostValue uint32) error {
 	return err
 }
 
-func (p *RawPacker) Pack64(hostValue uint64) error {
+func (p *RawPacker) pack64(hostValue uint64) error {
 	b := make([]byte, 8)
 	binary.LittleEndian.PutUint64(b, hostValue)
 	n, err := p.stream.Write(b)
@@ -37,6 +56,8 @@ func (p *RawPacker) Pack64(hostValue uint64) error {
 	}
 	return err
 }
+
+// RawUnpacker
 
 type RawUnpacker struct {
 	stream *bytes.Buffer

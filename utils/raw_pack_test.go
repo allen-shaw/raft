@@ -15,14 +15,17 @@ func TestPackAndUnpack(t *testing.T) {
 	assert.NotNil(t, packer)
 
 	// pack
-	packer.Pack32(1)
-	packer.Pack32(9)
-	packer.Pack64(9)
-	packer.Pack32(3)
-	packer.Pack64(0)
-	packer.Pack64(4)
-	packer.Pack64(1)
-	packer.Pack32(8)
+	err := packer.Pack32(1).
+		Pack32(9).
+		Pack64(9).
+		Pack32(3).
+		Pack64(0).
+		Pack64(4).
+		Pack64(1).
+		Pack32(8).
+		Error()
+
+	assert.Nil(t, err)
 
 	fmt.Println(stream.Bytes())
 

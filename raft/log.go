@@ -245,34 +245,16 @@ func (s *Segment) Append(entry *LogEntry) error {
 
 	header := bytes.NewBuffer(make([]byte, 0, EntryHeaderSize))
 	metaField := uint32(entry.Type)<<24 | uint32(s.checksumType<<16)
-	packer := utils.NewRawPacker(header)
-	err := packer.Pack64(uint64(entry.ID.Term))
-	if err != nil {
-		return err
-	}
-	err = packer.Pack32(metaField)
-	if err != nil {
-		return err
-	}
-	err = packer.Pack32(uint32(data.Len()))
-	if err != nil {
-		return err
-	}
-	sum, err := getChecksum(s.checksumType, data.Bytes())
-	if err != nil {
-		return err
-	}
-	err = packer.Pack32(sum)
-	if err != nil {
-		return err
-	}
 	headerBuf := header.Bytes()
-	sum, err = getChecksum(s.checksumType, headerBuf[:len(headerBuf)-4])
-	if err != nil {
-		return err
-	}
-	err = packer.Pack32(sum)
-	if err != nil {
+
+	packer := utils.NewRawPacker(header)
+	packer.Pack64(uint64(entry.ID.Term))
+	packer.Pack32(metaField)
+	packer.Pack32(uint32(data.Len()))
+	packer.Pack32(getChecksum(s.checksumType, data.Bytes()))
+	packer.Pack32(getChecksum(s.checksumType, headerBuf[:len(headerBuf)-4]))
+
+	if err := packer.Error(); err != nil {
 		return err
 	}
 
@@ -842,6 +824,7 @@ func (s *SegmentLogStorage) NewInstance(uri string) LogStorage {
 }
 
 func (s *SegmentLogStorage) GCInstance(uri string) utils.Status {
+	// TODO: to implements
 	return utils.Status{}
 }
 
@@ -970,15 +953,15 @@ func verifyChecksum(checksumType ChecksumType, data []byte, value uint32) bool {
 	}
 }
 
-func getChecksum(checksumType ChecksumType, data []byte) (uint32, error) {
+func getChecksum(checksumType ChecksumType, data []byte) uint32 {
 	switch checksumType {
 	case ChecksumMurmurhash32:
-		return murmurhash32(data), nil
+		return murmurhash32(data)
 	case ChecksumCrc32:
-		return crc32(data), nil
+		return crc32(data)
 	default:
 		log.Error("Unknown checksum type=%v", checksumType)
-		return 0, errUnknownChecksumType
+		return 0
 	}
 }
 
