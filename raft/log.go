@@ -392,7 +392,6 @@ func (s *Segment) Unlink() error {
 }
 
 func (s *Segment) Truncate(lastIndexKept int64) error {
-
 	s.mutex.Lock()
 	if lastIndexKept >= s.lastIndex {
 		s.mutex.Unlock()
@@ -406,7 +405,15 @@ func (s *Segment) Truncate(lastIndexKept int64) error {
 	s.mutex.Unlock()
 
 	if !s.isOpen {
-
+		oldPath := filepath.Join(s.path, fmt.Sprintf(SegmentClosedPattern, s.firstIndex, atomic.LoadInt64(&s.lastIndex)))
+		newPath := filepath.Join(s.path, fmt.Sprintf(SegmentOpenPattern, s.firstIndex))
+		err := os.Rename(oldPath, newPath)
+		if err != nil {
+			log.Error("Fail to rename %s to %s, err %v", oldPath, newPath, err)
+			return err
+		}
+		log.Info("Renamed %s to %s success", oldPath, newPath)
+		s.isOpen = true
 	}
 
 	err := s.file.Truncate(truncateSize)
@@ -824,22 +831,48 @@ func (s *SegmentLogStorage) NewInstance(uri string) LogStorage {
 }
 
 func (s *SegmentLogStorage) GCInstance(uri string) utils.Status {
-	// TODO: to implements
-	return utils.Status{}
+	status := utils.Status{}
+	if err := gcDir(uri); err != nil {
+		log.Error("Failed to gc log storage from path %s, err %v", uri, err)
+		status.SetError(int32(RaftError_EINVAL), "Failed to gc log storage")
+		return status
+	}
+	log.Info("Succeed to gc log storage from path %s", uri)
+	return status
 }
 
 func (s *SegmentLogStorage) Segments() SegmentMap {
-	return nil
-
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.segments
 }
 
 func (s *SegmentLogStorage) ListFiles() []string {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
 
-	return nil
+	segFiles := make([]string, 0, len(s.segments)+1)
+	for _, segment := range s.segments {
+		segFiles = append(segFiles, segment.FileName())
+	}
+	if s.openedSegment != nil {
+		segFiles = append(segFiles, s.openedSegment.FileName())
+	}
+
+	return segFiles
 }
 
 func (s *SegmentLogStorage) Sync() {
+	s.mutex.Lock()
+	segments := make([]*Segment, 0, len(s.segments))
+	for _, segment := range s.segments {
+		segments = append(segments, segment)
+	}
+	s.mutex.Unlock()
 
+	for _, segment := range segments {
+		segment.Sync(true)
+	}
 }
 
 func (s *SegmentLogStorage) openSegment() *Segment {
@@ -915,28 +948,135 @@ func (s *SegmentLogStorage) loadMeta() error {
 }
 
 func (s *SegmentLogStorage) listSegments(isEmpty bool) error {
-
+	// TODO: to implements
 	return nil
 }
 
 func (s *SegmentLogStorage) loadSegments(manager *ConfigurationManager) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	for _, segment := range s.segments {
+		log.Info("load closed segment, path: %s, first index: %v, last index: %v",
+			s.path, segment.FirstIndex(), segment.LastIndex())
+		err := segment.Load(manager)
+		if err != nil {
+			return err
+		}
+		atomic.StoreInt64(&s.lastLogIndex, segment.LastIndex())
+	}
+
+	if s.openedSegment != nil {
+		log.Info("oad open segment, path: %s, first index %v", s.path, s.openedSegment.FirstIndex())
+		err := s.openedSegment.Load(manager)
+		if err != nil {
+			return nil
+		}
+		if atomic.LoadInt64(&s.firstLogIndex) > s.openedSegment.LastIndex() {
+			log.Error("open segment need discard, path: %s, first_log_index %v, first_index %v, last_index %v",
+				s.path, atomic.LoadInt64(&s.firstLogIndex), s.openedSegment.FirstIndex(), s.openedSegment.LastIndex())
+			s.openedSegment.Unlink()
+			s.openedSegment = nil
+		} else {
+			atomic.StoreInt64(&s.lastLogIndex, s.openSegment().LastIndex())
+		}
+	}
+
+	if s.lastLogIndex == 0 {
+		s.lastLogIndex = s.firstLogIndex - 1
+	}
 
 	return nil
 }
 
-func (s *SegmentLogStorage) getSegment(logIndex int64) (*Segment, error) {
+func (s *SegmentLogStorage) getSegment(index int64) (*Segment, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	firstIndex := s.FirstLogIndex()
+	lastIndex := s.LastLogIndex()
+
+	if firstIndex == lastIndex+1 {
+		return nil, errors.New("no segments")
+	}
+
+	if index < firstIndex || index > lastIndex+1 {
+		if index > lastIndex {
+			log.Error("Attempted to access entry %v outside of log, first_log_index %v, last_log_index %v",
+				index, firstIndex, lastIndex)
+		}
+		return nil, errors.New("no segments")
+	} else if index == lastIndex+1 {
+		return nil, errors.New("no segments")
+	}
+
+	if s.openedSegment != nil && index >= s.openedSegment.FirstIndex() {
+		return s.openedSegment, nil
+	} else {
+		log.CHECK(len(s.segments) != 0, "!s.segment.empty()")
+
+		// FIXME: 需要map 有序，支持upper_bound(index)
+		//return
+	}
 
 	return nil, nil
 }
 
 func (s *SegmentLogStorage) popSegments(firstIndexKept int64) []*Segment {
+	popped := make([]*Segment, 0)
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
 
-	return nil
+	atomic.StoreInt64(&s.firstLogIndex, firstIndexKept)
+	for key, segment := range s.segments {
+		if segment.LastIndex() < firstIndexKept {
+			popped = append(popped, segment)
+			delete(s.segments, key)
+		} else {
+			return popped
+		}
+	}
+
+	if s.openedSegment != nil {
+		if s.openedSegment.LastIndex() < firstIndexKept {
+			popped = append(popped, s.openedSegment)
+			s.openedSegment = nil
+			atomic.StoreInt64(&s.lastLogIndex, firstIndexKept-1)
+		} else {
+			log.CHECK(s.openedSegment.FirstIndex() <= firstIndexKept, "s.openedSegment.FirstIndex() <= firstIndexKept")
+		}
+	} else {
+		atomic.StoreInt64(&s.lastLogIndex, firstIndexKept-1)
+	}
+
+	return popped
 }
 
 // popped []*Segment, lastSegment *Segment
 func (s *SegmentLogStorage) popSegmentsFromBack(lastIndexKept int64) ([]*Segment, *Segment) {
+	popped := make([]*Segment, 0)
+	var lastSegment *Segment
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
 
+	atomic.StoreInt64(&s.lastLogIndex, lastIndexKept)
+	if s.openedSegment != nil {
+		if s.openedSegment.FirstIndex() <= lastIndexKept {
+			lastSegment = s.openedSegment
+			return popped, lastSegment
+		}
+		popped = append(popped, s.openedSegment)
+		s.openedSegment = nil
+	}
+
+	// FIXME: segmentMap需要有序，而且支持反向查找，segmentMap需要重写
+	//for key, segment := range s.segments {
+	//	if segment.FirstIndex() <= lastIndexKept {
+	//		break
+	//	}
+	//	popped = append(popped, segment)
+	//	delete(s.segments, key)
+	//}
 	return nil, nil
 }
 

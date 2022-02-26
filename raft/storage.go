@@ -2,11 +2,11 @@ package raft
 
 import (
 	"fmt"
-	"google.golang.org/protobuf/proto"
-	"strings"
-
 	"github.com/AllenShaw19/raft/log"
 	"github.com/AllenShaw19/raft/utils"
+	"google.golang.org/protobuf/proto"
+	"os"
+	"strings"
 )
 
 type logStorageExtension struct {
@@ -63,44 +63,6 @@ type LogStorage interface {
 	GCInstance(uri string) utils.Status
 }
 
-func CreateLogStorage(uri string) LogStorage {
-	protocol, parameter, err := parseUri(uri)
-	if err != nil {
-		log.Error("Parse log storage uri='%s', error: %v", uri, err)
-		return nil
-	}
-	if ext, ok := logStorageExtensions[protocol]; ok {
-		return ext.NewInstance(parameter)
-	}
-	log.Error("Fail to find log storage type %s, uri=%s", protocol, uri)
-	return nil
-}
-
-func DestroyLogStorage(uri string) utils.Status {
-	var status utils.Status
-	protocol, parameter, err := parseUri(uri)
-	if err != nil {
-		log.Error("Parse log storage uri='%s', error: %v", uri, err)
-		status.SetError(int32(RaftError_EINVAL), "Invalid log storage uri")
-		return status
-	}
-	if ext, ok := logStorageExtensions[protocol]; ok {
-		return ext.Instance.GCInstance(parameter)
-	}
-	log.Error("Fail to find log storage type %s, uri=%s", protocol, uri)
-	status.SetError(int32(RaftError_EINVAL), "Invalid log storage uri")
-	return status
-}
-
-func parseUri(uri string) (protocol string, parameter string, err error) {
-	// ${protocol}://${parameters}
-	s := strings.Split(uri, "://")
-	if len(s) != 2 {
-		return "", "", fmt.Errorf("invaild log storage uri")
-	}
-	return s[0], strings.TrimSpace(s[1]), nil
-}
-
 // MetaStorage Interface
 type MetaStorage interface {
 	Init() error
@@ -152,4 +114,76 @@ type SnapshotStorage interface {
 	Create(uri string) SnapshotStorage
 	GCInstance(uri string) error
 	Destroy(uri string) error
+}
+
+// 一些公共函数
+
+func CreateLogStorage(uri string) LogStorage {
+	protocol, parameter, err := parseUri(uri)
+	if err != nil {
+		log.Error("Parse log storage uri='%s', error: %v", uri, err)
+		return nil
+	}
+	if ext, ok := logStorageExtensions[protocol]; ok {
+		return ext.NewInstance(parameter)
+	}
+	log.Error("Fail to find log storage type %s, uri=%s", protocol, uri)
+	return nil
+}
+
+func DestroyLogStorage(uri string) utils.Status {
+	var status utils.Status
+	protocol, parameter, err := parseUri(uri)
+	if err != nil {
+		log.Error("Parse log storage uri='%s', error: %v", uri, err)
+		status.SetError(int32(RaftError_EINVAL), "Invalid log storage uri")
+		return status
+	}
+	if ext, ok := logStorageExtensions[protocol]; ok {
+		return ext.Instance.GCInstance(parameter)
+	}
+	log.Error("Fail to find log storage type %s, uri=%s", protocol, uri)
+	status.SetError(int32(RaftError_EINVAL), "Invalid log storage uri")
+	return status
+}
+
+func parseUri(uri string) (protocol string, parameter string, err error) {
+	// ${protocol}://${parameters}
+	s := strings.Split(uri, "://")
+	if len(s) != 2 {
+		return "", "", fmt.Errorf("invaild log storage uri")
+	}
+	return s[0], strings.TrimSpace(s[1]), nil
+}
+
+func gcDir(path string) error {
+	targetPath := path
+	tmpPath := path + ".tmp"
+
+	if err := os.RemoveAll(tmpPath); err != nil {
+		log.Error("fail to delete tmp file, path: %s", tmpPath)
+		return err
+	}
+
+	exist, err := utils.PathExists(targetPath)
+	if err != nil {
+		return err
+	}
+
+	if !exist {
+		log.Info("Target path not exist, so no need to gc, path: %s", targetPath)
+		return nil
+	}
+	err = os.Rename(targetPath, tmpPath)
+	if err != nil {
+		log.Error("Fail to rename %s to %s: err %v", targetPath, tmpPath, err)
+		return err
+	}
+	err = os.RemoveAll(tmpPath)
+	if err != nil {
+		log.Error("Fail to delete tmp file, path: %s, err %v", tmpPath, err)
+		return err
+	}
+
+	return nil
 }
