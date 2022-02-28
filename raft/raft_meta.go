@@ -40,4 +40,7 @@ func NewKVBasedMergedMetaStorageImpl(path string) *KVBasedMergedMetaStorageImpl 
 }
 func (s *KVBasedMergedMetaStorageImpl) Init() error {
 
+	// todo implement me
+
+	return nil
 }
