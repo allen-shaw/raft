@@ -42,3 +42,8 @@ func (cc *CatchupClosure) run() {
 //Replicator start
 type Replicator struct {
 }
+
+func (r *Replicator) Start(options *ReplicatorOptions) (ReplicatorId, error) {
+	//if options.LogManager == nil || options.
+	return 0, nil
+}
