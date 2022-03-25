@@ -1,0 +1,29 @@
+syntax="proto3";
+
+package entity;
+option go_package = "github.com/AllenShaw19/raft/raft/entity;entity";
+
+import "enum.proto";
+
+message EntryMeta {
+  int64 term = 1;
+  EntryType type = 2;
+  repeated string peers = 3;
+  int64 data_len = 4;
+  // Don't change field id of `old_peers' in the consideration of backward
+  // compatibility
+  repeated string old_peers = 5;
+  // Checksum fot this log entry
+  int64 checksum = 6;
+  repeated string learners = 7;
+  repeated string old_learners = 8;
+};
+
+message SnapshotMeta {
+  int64 last_included_index = 1;
+  int64 last_included_term = 2;
+  repeated string peers = 3;
+  repeated string old_peers = 4;
+  repeated string learners = 5;
+  repeated string old_learners = 6;
+}
