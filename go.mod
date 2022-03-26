@@ -4,6 +4,7 @@ go 1.18
 
 require (
 	github.com/cockroachdb/pebble v0.0.0-20220323190648-7ad3551b2050
+	github.com/smartystreets-prototypes/go-disruptor v0.0.0-20200316140655-c96477fd7a6a
 	google.golang.org/protobuf v1.28.0
 )
 
