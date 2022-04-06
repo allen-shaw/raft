@@ -1,5 +1,10 @@
 package raft
 
+import (
+	"github.com/AllenShaw19/raft/raft/error"
+	"strconv"
+)
+
 //A Status encapsulates the result of an operation. It may indicate success,
 //or it may indicate an error with an associated error message. It's suitable
 //for passing status of functions with richer information than just error_code
@@ -18,6 +23,10 @@ type Status struct {
 
 func OK() *Status {
 	return &Status{}
+}
+
+func NewNilStatus() *Status {
+	return &Status{state: nil}
 }
 
 func NewStatus(code int, msg string) *Status {
@@ -46,6 +55,13 @@ func (s *Status) GetCode() int {
 		return 0
 	}
 	return s.state.code
+}
+
+func (s *Status) String() string {
+	if s.IsOK() {
+		return "Status[OK]"
+	}
+	return "Status[" + error.DescribeCode(s.state.code) + "<" + strconv.Itoa(s.state.code) + ">: " + s.state.msg + "]"
 }
 
 //Status internal state.

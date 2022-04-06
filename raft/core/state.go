@@ -1,6 +1,6 @@
 package core
 
-type State int
+type State int32
 
 const (
 	StateLeader        State = iota // It's a leader

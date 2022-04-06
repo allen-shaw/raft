@@ -90,12 +90,15 @@ type LogManager interface {
 	GetFirstLogIndex() int64
 
 	// GetLastLogIndex Get the last log index of log
+	GetLastLogIndex() int64
+
+	// GetLastLogIndexWithFlush GetLastLogIndex Get the last log index of log
 	// @param isFlush whether to flush from disk.
-	GetLastLogIndex(isFlush bool) int64
+	GetLastLogIndexWithFlush(isFlush bool) int64
 
 	// GetLastLogId Return the id the last log.
 	// @param isFlush whether to flush all pending task.
-	GetLastLogId(isFlush bool) *entity.LogEntry
+	GetLastLogId(isFlush bool) *entity.LogId
 
 	// GetConfiguration Get the configuration at index.
 	GetConfiguration(index int64) *conf.ConfigurationEntry
