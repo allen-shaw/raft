@@ -9,9 +9,9 @@ import (
 	"github.com/AllenShaw19/raft/utils"
 )
 
-type GroupID string
+type GroupId string
 
-// VersionedGroupId GroupID with version, format: {group_id}_{index}
+// VersionedGroupId GroupId with version, format: {group_id}_{index}
 type VersionedGroupId string
 
 type PeerId struct {
@@ -67,6 +67,19 @@ func (peer *PeerId) Parse(str string) error {
 
 func (peer *PeerId) String() string {
 	return fmt.Sprintf("%s:%d", peer.Addr.String(), peer.Idx)
+}
+
+type NodeId struct {
+	groupId GroupId
+	peerId  *PeerId
+}
+
+func NewNodeId(groupId GroupId, peerId *PeerId) *NodeId {
+	nodeId := &NodeId{
+		groupId: groupId,
+		peerId:  peerId,
+	}
+	return nodeId
 }
 
 // Configuration begin

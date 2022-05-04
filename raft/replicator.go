@@ -9,7 +9,7 @@ type ReplicatorStatus struct {
 type ReplicatorOptions struct {
 	DynamicHeartbeatTimeoutMs *int
 	ElectionTimeoutMs         *int
-	GroupId                   GroupID
+	GroupId                   GroupId
 	ServerId                  PeerId
 	PeerId                    PeerId
 	LogManager                *LogManager
@@ -39,11 +39,55 @@ func (cc *CatchupClosure) run() {
 
 }
 
-//Replicator start
-type Replicator struct {
+//
+type St int
+
+const (
+	StIdle St = 0
+	StBlocking
+	StAppendingEntries
+	StInstallingSnapshot
+)
+
+type Stat struct {
+	st               St
+	firstLogIndex    int64
+	lastLogIncluded  int64
+	lastLogIndex     int64
+	LastTermIncluded int64
 }
 
-func (r *Replicator) Start(options *ReplicatorOptions) (ReplicatorId, error) {
+type FlyingAppendEntriesRpc struct {
+}
+
+//Replicator start
+type Replicator struct {
+	nextIndex               int64
+	flyingAppendEntriesSize int64
+	consecutiveErrorTimes   int
+	hasSucceeded            bool
+	timeoutNowIndex         int64
+	heartbeatCounter        int64
+	appendEntriesCounter    int64
+	InstallSnapshotCounter  int64
+	readonlyIndex           int64
+	st                      Stat
+	AppendEntriesInfly      []FlyingAppendEntriesRpc
+}
+
+func Start(options *ReplicatorOptions) (ReplicatorId, error) {
 	//if options.LogManager == nil || options.
 	return 0, nil
+}
+
+func Stop(id ReplicatorId) error {
+
+}
+
+func Join(id Replicator) error {
+
+}
+
+func WaitForCaughtUp(id ReplicatorId, maxMargin int64, dueTime time.Time, done *CatchupClosure) {
+
 }
