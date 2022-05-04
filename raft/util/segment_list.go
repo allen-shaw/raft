@@ -13,7 +13,7 @@ const (
 //        segment             segment              segment
 //     [0, 1 ... 127]    [128, 129 ... 255]    [256, 257 ... 383]
 type SegmentList[T any] struct {
-	segments ArrayDeque[T]
+	segments ArrayDeque[*Segment[T]]
 }
 
 type Segment[T any] struct {
