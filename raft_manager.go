@@ -21,11 +21,16 @@ func NewNodeManager() *NodeManager {
 
 func (m *NodeManager) Init(ctx context.Context) error {
 	//
+
+	return nil
 }
 
 func (m *NodeManager) AddRaft(r *raft.Raft) error {
 
+	return nil
 }
 
 func (m *NodeManager) GetTransport() (raft.Transport, error) {
+	t := m.tm.Transport()
+	return t, nil
 }

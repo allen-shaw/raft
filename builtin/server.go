@@ -15,10 +15,10 @@ type ApiService struct {
 	conf   *Config
 	e      *gin.Engine
 	logger raft.Logger
-	mgr    *raft.RaftManager
+	mgr    *raft.NodeManager
 }
 
-func NewApiService(mgr *raft.RaftManager, conf *Config, logger raft.Logger) *ApiService {
+func NewApiService(mgr *raft.NodeManager, conf *Config, logger raft.Logger) *ApiService {
 	s := &ApiService{}
 	s.mgr = mgr
 	s.conf = conf

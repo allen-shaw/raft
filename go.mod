@@ -4,7 +4,6 @@ go 1.18
 
 require (
 	github.com/armon/go-metrics v0.4.1
-	github.com/boltdb/bolt v1.3.1
 	github.com/gin-gonic/gin v1.8.1
 	github.com/hashicorp/go-hclog v1.3.1
 	github.com/hashicorp/go-msgpack v0.5.5
