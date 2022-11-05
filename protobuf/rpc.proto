@@ -1,6 +1,0 @@
-syntax="proto3";
-
-package rpc;
-option go_package="github.com/AllenShaw19/raft/raft/rpc;rpc";
-
-import "raft.proto";
