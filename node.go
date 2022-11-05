@@ -9,25 +9,23 @@ import (
 	"path/filepath"
 )
 
-type Config struct {
-	RaftDir string
-}
-
 type Node struct {
-	id     string
-	raft   *raft.Raft
-	logger Logger
-	mgr    *NodeManager
-	conf   *Config
-	fsm    raft.FSM
+	id      string
+	groupID string
+	server  *Server
+	raft    *raft.Raft
+	logger  Logger
+	mgr     *NodeManager
+	fsm     raft.FSM
 }
 
-func NewNode(id string, mgr *NodeManager, logger Logger, conf *Config) *Node {
+func NewNode(groupID string, mgr *NodeManager, logger Logger, svr *Server) *Node {
 	n := &Node{}
-	n.id = id
+	n.groupID = groupID
+	n.id = genNodeID(svr.ID, groupID)
 	n.logger = logger
 	n.mgr = mgr
-	n.conf = conf
+	n.server = svr
 	return n
 }
 
@@ -35,7 +33,7 @@ func (n *Node) Init(ctx context.Context) error {
 	config := raft.DefaultConfig()
 	config.LocalID = raft.ServerID(n.id)
 
-	baseDir := filepath.Join(n.conf.RaftDir, n.id)
+	baseDir := filepath.Join(n.server.RaftDir, n.id)
 	isNewNode := !utils.IsPathExists(baseDir)
 
 	// get transport
@@ -94,4 +92,9 @@ func (n *Node) SetLogger(logger Logger) {
 
 func (n *Node) SetMgr(mgr *NodeManager) {
 	n.mgr = mgr
+}
+
+func genNodeID(serverID, groupID string) string {
+	nodeID := serverID + "/" + groupID
+	return nodeID
 }

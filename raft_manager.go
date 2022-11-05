@@ -8,9 +8,10 @@ import (
 )
 
 type NodeManager struct {
-	lock  sync.RWMutex
-	nodes []*Node
-	tm    *transport.Manager
+	lock   sync.RWMutex
+	nodes  []*Node
+	tm     *transport.Manager
+	server *Server
 }
 
 func NewNodeManager() *NodeManager {
