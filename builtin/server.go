@@ -15,12 +15,17 @@ type ApiService struct {
 	conf   *Config
 	e      *gin.Engine
 	logger raft.Logger
+	mgr    *raft.RaftManager
 }
 
-func NewApiService() *ApiService {
+func NewApiService(mgr *raft.RaftManager, conf *Config, logger raft.Logger) *ApiService {
 	s := &ApiService{}
+	s.mgr = mgr
+	s.conf = conf
+	s.logger = logger
 	s.e = gin.Default()
 	// set route
+	s.init()
 
 	return s
 }
@@ -32,4 +37,16 @@ func (s *ApiService) Run(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+func (s *ApiService) init() {
+	s.e.Use(gin.Logger())
+	s.e.Use(gin.Recovery())
+
+	api := s.e.Group("/api")
+	api.GET("/leader", s.getLeader)
+}
+
+func (s *ApiService) getLeader(ctx *gin.Context) {
+
 }
