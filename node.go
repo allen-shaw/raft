@@ -35,6 +35,12 @@ func (n *Node) Init(ctx context.Context) error {
 
 	baseDir := filepath.Join(n.server.RaftDir, n.id)
 	isNewNode := !utils.IsPathExists(baseDir)
+	if isNewNode {
+		err := os.MkdirAll(baseDir, os.ModePerm)
+		if err != nil {
+			return err
+		}
+	}
 
 	// get transport
 	transport, err := n.mgr.GetTransport()
@@ -86,12 +92,26 @@ func (n *Node) Init(ctx context.Context) error {
 	return nil
 }
 
+func (n *Node) ID() string {
+	return n.id
+}
+
 func (n *Node) SetLogger(logger Logger) {
 	n.logger = logger
 }
 
 func (n *Node) SetMgr(mgr *NodeManager) {
 	n.mgr = mgr
+}
+
+func (n *Node) IsLeader() bool {
+	address, _ := n.raft.LeaderWithID()
+	return address == raft.ServerAddress(n.server.Address())
+}
+
+func (n *Node) GetLeader() (string, string) {
+	addr, id := n.raft.LeaderWithID()
+	return string(addr), string(id)
 }
 
 func genNodeID(serverID, groupID string) string {

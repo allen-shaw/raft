@@ -5,10 +5,11 @@ import (
 	"github.com/AllenShaw19/raft"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
+	"net/http"
 )
 
 type Config struct {
-	address string
+	Address string
 }
 
 type ApiService struct {
@@ -19,6 +20,8 @@ type ApiService struct {
 }
 
 func NewApiService(mgr *raft.NodeManager, conf *Config, logger raft.Logger) *ApiService {
+	gin.SetMode(gin.ReleaseMode)
+
 	s := &ApiService{}
 	s.mgr = mgr
 	s.conf = conf
@@ -31,12 +34,15 @@ func NewApiService(mgr *raft.NodeManager, conf *Config, logger raft.Logger) *Api
 }
 
 func (s *ApiService) Run(ctx context.Context) error {
-	err := s.e.Run(s.conf.address)
-	if err != nil {
-		s.logger.Error(ctx, "run api service fail", zap.Any("addr", s.conf.address), zap.Error(err))
-		return err
-	}
-	return nil
+	var err error
+	go func() {
+		err = s.e.Run(s.conf.Address)
+		if err != nil {
+			s.logger.Error(ctx, "run api service fail", zap.Any("addr", s.conf.Address), zap.Error(err))
+		}
+	}()
+
+	return err
 }
 
 func (s *ApiService) init() {
@@ -45,8 +51,29 @@ func (s *ApiService) init() {
 
 	api := s.e.Group("/api")
 	api.GET("/leader", s.getLeader)
+	api.GET("/status", s.getStatus)
 }
 
 func (s *ApiService) getLeader(ctx *gin.Context) {
 
+}
+
+func (s *ApiService) getStatus(ctx *gin.Context) {
+	status := &Status{Nodes: make([]*NodeInfo, 0)}
+
+	nodes := s.mgr.GetNodeInfos()
+	for _, node := range nodes {
+		info := &NodeInfo{
+			ID:       node.ID(),
+			IsLeader: node.IsLeader(),
+		}
+		if !info.IsLeader {
+			leaderAddr, leaderID := node.GetLeader()
+			info.Leader = &Leader{ID: leaderID, Address: leaderAddr}
+		}
+		status.Nodes = append(status.Nodes, info)
+	}
+
+	resp := &Response{Code: 0, Msg: "ok", Data: status}
+	ctx.JSON(http.StatusOK, resp)
 }
