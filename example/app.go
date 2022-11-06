@@ -36,7 +36,7 @@ func main() {
 	}
 
 	for i, conf := range nodeConfigs {
-		err := nodeMgr.NewRaftNode(ctx, conf)
+		err := nodeMgr.NewRaftNode(ctx, conf, NewTable(conf.GroupID))
 		if err != nil {
 			fmt.Printf("new raft node fail,i=%v, conf=%+v, err:%v \n", i, conf, err)
 			panic(err)

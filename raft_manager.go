@@ -44,8 +44,8 @@ func (m *NodeManager) Init(ctx context.Context) error {
 	return nil
 }
 
-func (m *NodeManager) NewRaftNode(ctx context.Context, conf *NodeConfig) error {
-	n := NewNode(conf.GroupID, m, m.logger, m.server)
+func (m *NodeManager) NewRaftNode(ctx context.Context, conf *NodeConfig, fsm raft.FSM) error {
+	n := NewNode(conf.GroupID, m, m.logger, m.server, fsm)
 	err := n.Init(ctx)
 	if err != nil {
 		return err

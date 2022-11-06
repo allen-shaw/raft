@@ -19,13 +19,14 @@ type Node struct {
 	fsm     raft.FSM
 }
 
-func NewNode(groupID string, mgr *NodeManager, logger Logger, svr *Server) *Node {
+func NewNode(groupID string, mgr *NodeManager, logger Logger, svr *Server, fsm raft.FSM) *Node {
 	n := &Node{}
 	n.groupID = groupID
 	n.id = genNodeID(svr.ID, groupID)
 	n.logger = logger
 	n.mgr = mgr
 	n.server = svr
+	n.fsm = fsm
 	return n
 }
 
