@@ -17,3 +17,5 @@ vendor/
 # IDEA config
 .idea
 /.idea/
+/example/app
+/data/
