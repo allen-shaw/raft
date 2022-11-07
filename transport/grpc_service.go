@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"fmt"
 	"github.com/AllenShaw19/raft/raft"
 	"github.com/AllenShaw19/raft/transport/codec"
 	pb "github.com/AllenShaw19/raft/transport/proto"
@@ -88,10 +89,13 @@ func (s rpcService) AppendEntries(ctx context.Context, req *pb.AppendEntriesRequ
 }
 
 func (s rpcService) RequestVote(ctx context.Context, req *pb.RequestVoteRequest) (*pb.RequestVoteResponse, error) {
+	fmt.Printf("[RequestVote] req %+v \n", req)
 	resp, err := s.handleRPC(codec.DecodeRequestVoteRequest(req), nil)
 	if err != nil {
+		fmt.Printf("[RequestVote] fail %+v \n", err)
 		return nil, err
 	}
+	fmt.Printf("[RequestVote] succ %+v \n", resp)
 	return codec.EncodeRequestVoteResponse(resp.(*raft.RequestVoteResponse)), nil
 }
 

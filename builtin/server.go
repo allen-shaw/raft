@@ -52,6 +52,7 @@ func (s *ApiService) init() {
 	api := s.e.Group("/api")
 	api.GET("/leader", s.getLeader)
 	api.GET("/status", s.getStatus)
+	api.POST("/join", s.handleJoin)
 }
 
 func (s *ApiService) getLeader(ctx *gin.Context) {
@@ -75,5 +76,22 @@ func (s *ApiService) getStatus(ctx *gin.Context) {
 	}
 
 	resp := &Response{Code: 0, Msg: "ok", Data: status}
+	ctx.JSON(http.StatusOK, resp)
+}
+
+func (s *ApiService) handleJoin(ctx *gin.Context) {
+	req := &JoinRequest{}
+	err := ctx.ShouldBindJSON(req)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, nil)
+		return
+	}
+	err = s.mgr.Join(ctx, req.NodeID, req.GroupID, req.Address)
+	if err != nil {
+		resp := &Response{Code: 10001, Msg: err.Error(), Data: nil}
+		ctx.JSON(http.StatusOK, resp)
+	}
+
+	resp := &Response{Code: 0, Msg: "ok", Data: nil}
 	ctx.JSON(http.StatusOK, resp)
 }

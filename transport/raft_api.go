@@ -241,7 +241,7 @@ func (r raftApi) getPeer(id raft.ServerID, target raft.ServerAddress) (pb.RaftCl
 	r.m.connectionMtx.Lock()
 	c, ok := r.m.connections[id]
 	if !ok {
-		c := &conn{}
+		c = &conn{}
 		r.m.connections[id] = c
 	}
 	r.m.connectionMtx.Unlock()

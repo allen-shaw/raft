@@ -2,6 +2,7 @@ package raft
 
 import (
 	"context"
+	"fmt"
 	"github.com/AllenShaw19/raft/raft"
 	"github.com/AllenShaw19/raft/store/boltdb"
 	"github.com/AllenShaw19/raft/utils"
@@ -30,7 +31,7 @@ func NewNode(groupID string, mgr *NodeManager, logger Logger, svr *Server, fsm r
 	return n
 }
 
-func (n *Node) Init(ctx context.Context) error {
+func (n *Node) Init(ctx context.Context, peers []string) error {
 	config := raft.DefaultConfig()
 	config.LocalID = raft.ServerID(n.id)
 
@@ -75,7 +76,7 @@ func (n *Node) Init(ctx context.Context) error {
 	n.raft = r
 
 	// bootstrap for new node
-	if isNewNode {
+	if isNewNode && len(peers) == 0 {
 		configuration := raft.Configuration{
 			Servers: []raft.Server{
 				{
@@ -90,7 +91,18 @@ func (n *Node) Init(ctx context.Context) error {
 		}
 	}
 
+	for _, peer := range peers {
+		err := n.join(peer)
+		if err != nil {
+			fmt.Printf("%v join to %v fail, err: %v\n", n.id, peer, err)
+		}
+	}
+
 	return nil
+}
+
+func (n *Node) GroupID() string {
+	return n.groupID
 }
 
 func (n *Node) ID() string {
@@ -113,6 +125,16 @@ func (n *Node) IsLeader() bool {
 func (n *Node) GetLeader() (string, string) {
 	addr, id := n.raft.LeaderWithID()
 	return string(addr), string(id)
+}
+
+func (n *Node) join(peer string) error {
+	req := map[string]string{"group_id": n.GroupID(), "node_id": n.ID(), "address": n.server.Address()}
+	url := fmt.Sprintf("http://%v/api/join", peer)
+	_, err := utils.PostJson(url, req)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func genNodeID(serverID, groupID string) string {

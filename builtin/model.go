@@ -20,3 +20,9 @@ type NodeInfo struct {
 	IsLeader bool    `json:"is_leader"`
 	Leader   *Leader `json:"leader"`
 }
+
+type JoinRequest struct {
+	GroupID string `json:"group_id"`
+	NodeID  string `json:"node_id"`
+	Address string `json:"address"`
+}

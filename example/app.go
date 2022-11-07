@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"github.com/AllenShaw19/raft"
 	"github.com/AllenShaw19/raft/builtin"
@@ -10,12 +11,42 @@ import (
 	"os/signal"
 )
 
+var (
+	serverID string
+	IP       string
+	Port     int
+	HttpPort int
+	RaftDir  string
+	Peer     string
+)
+
+func init() {
+	flag.StringVar(&serverID, "serverid", "node01", "serverID,node01")
+	flag.StringVar(&IP, "ip", "127.0.0.1", "server ip, 127.0.0.1")
+	flag.IntVar(&Port, "port", 8081, "port, 8081")
+	flag.IntVar(&HttpPort, "httpport", 18081, "http port, 18081")
+	flag.StringVar(&RaftDir, "dir", "./data", "raft dir, ./data")
+	flag.StringVar(&Peer, "peer", "", "peer, 127.0.0.1:8081")
+}
+
 func main() {
+	flag.Parse()
+
+	serverID = "node02"
+	Port = 8082
+	HttpPort = 18082
+	Peer = "127.0.0.1:18081"
+
 	server := &raft.Server{
-		ID:      "node01",
-		IP:      "127.0.0.1",
-		Port:    8081,
-		RaftDir: "./data",
+		ID:       serverID,
+		IP:       IP,
+		Port:     Port,
+		HttpPort: HttpPort,
+		RaftDir:  RaftDir,
+	}
+	peerAddrs := make([]string, 0)
+	if Peer != "" {
+		peerAddrs = append(peerAddrs, Peer)
 	}
 	ctx := context.Background()
 
@@ -28,10 +59,11 @@ func main() {
 
 	fmt.Println("node manager start success")
 
-	nodeConfigs := make([]*raft.NodeConfig, 2)
+	nodeConfigs := make([]*raft.NodeConfig, 1)
 	for i := range nodeConfigs {
 		nodeConfigs[i] = &raft.NodeConfig{
-			GroupID: fmt.Sprintf("group%02d", i),
+			GroupID:     fmt.Sprintf("group%02d", i),
+			PeerAddress: peerAddrs,
 		}
 	}
 
@@ -44,7 +76,7 @@ func main() {
 	}
 	fmt.Println("raft node add success")
 
-	apiService := builtin.NewApiService(nodeMgr, &builtin.Config{Address: "127.0.0.1:19948"}, logger)
+	apiService := builtin.NewApiService(nodeMgr, &builtin.Config{Address: server.HttpAddr()}, logger)
 	err = apiService.Run(ctx)
 	if err != nil {
 		panic(err)
