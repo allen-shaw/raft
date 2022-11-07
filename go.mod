@@ -1,6 +1,6 @@
 module github.com/AllenShaw19/raft
 
-go 1.17
+go 1.18
 
 require (
 	github.com/armon/go-metrics v0.4.1

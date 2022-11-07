@@ -26,16 +26,15 @@ func init() {
 	flag.IntVar(&Port, "port", 8081, "port, 8081")
 	flag.IntVar(&HttpPort, "httpport", 18081, "http port, 18081")
 	flag.StringVar(&RaftDir, "dir", "./data", "raft dir, ./data")
-	flag.StringVar(&Peer, "peer", "", "peer, 127.0.0.1:8081")
+	flag.StringVar(&Peer, "peer", "", "peer, 127.0.0.1:18081")
 }
 
 func main() {
 	flag.Parse()
-
-	serverID = "node02"
-	Port = 8082
-	HttpPort = 18082
-	Peer = "127.0.0.1:18081"
+	//serverID = "node02"
+	//Port = 8082
+	//HttpPort = 18082
+	//Peer = "127.0.0.1:18081"
 
 	server := &raft.Server{
 		ID:       serverID,
@@ -50,7 +49,7 @@ func main() {
 	}
 	ctx := context.Background()
 
-	logger := &Logger{}
+	logger := NewLogger()
 	nodeMgr := raft.NewNodeManager(server, logger)
 	err := nodeMgr.Init(ctx)
 	if err != nil {

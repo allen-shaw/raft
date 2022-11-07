@@ -154,7 +154,7 @@ func (r raftApi) AppendEntries(id raft.ServerID, target raft.ServerAddress, args
 	if err != nil {
 		return err
 	}
-	resp = codec.DecodeAppendEntriesResponse(ret)
+	*resp = *codec.DecodeAppendEntriesResponse(ret)
 	return nil
 }
 
@@ -168,7 +168,7 @@ func (r raftApi) RequestVote(id raft.ServerID, target raft.ServerAddress, args *
 	if err != nil {
 		return err
 	}
-	resp = codec.DecodeRequestVoteResponse(ret)
+	*resp = *codec.DecodeRequestVoteResponse(ret)
 	return nil
 }
 
@@ -205,7 +205,7 @@ func (r raftApi) InstallSnapshot(id raft.ServerID, target raft.ServerAddress, ar
 	if err != nil {
 		return err
 	}
-	resp = codec.DecodeInstallSnapshotResponse(ret)
+	*resp = *codec.DecodeInstallSnapshotResponse(ret)
 	return nil
 }
 
@@ -233,7 +233,7 @@ func (r raftApi) TimeoutNow(id raft.ServerID, target raft.ServerAddress, args *r
 	if err != nil {
 		return err
 	}
-	resp = codec.DecodeTimeoutNowResponse(ret)
+	*resp = *codec.DecodeTimeoutNowResponse(ret)
 	return nil
 }
 
