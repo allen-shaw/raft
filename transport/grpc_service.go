@@ -35,7 +35,7 @@ type rpcService struct {
 	manager *Manager
 }
 
-func (s rpcService) handleRPC(command interface{}, data io.Reader) (interface{}, error) {
+func (s rpcService) handleRPC(groupID string, command interface{}, data io.Reader) (interface{}, error) {
 	ch := make(chan raft.RPCResponse, 1)
 	rpc := raft.RPC{
 		Command:  command,
@@ -44,15 +44,13 @@ func (s rpcService) handleRPC(command interface{}, data io.Reader) (interface{},
 	}
 	if isHeartbeat(command) {
 		// We can take the fast path and use the heartbeat callback and skip the queue in s.manager.rpcChan.
-		s.manager.heartbeatFuncMtx.Lock()
-		fn := s.manager.heartbeatFunc
-		s.manager.heartbeatFuncMtx.Unlock()
+		fn := s.manager.GetHeartbeatFunc(groupID)
 		if fn != nil {
 			fn(rpc)
 			goto wait
 		}
 	}
-	s.manager.rpcChan <- rpc
+	s.manager.GetRPCChan(groupID) <- rpc
 wait:
 	resp := <-ch
 	if resp.Error != nil {
@@ -67,7 +65,7 @@ func (s rpcService) AppendEntriesPipeline(server pb.Raft_AppendEntriesPipelineSe
 		if err != nil {
 			return err
 		}
-		resp, err := s.handleRPC(codec.DecodeAppendEntriesRequest(msg), nil)
+		resp, err := s.handleRPC(msg.RpcHeader.GroupId, codec.DecodeAppendEntriesRequest(msg), nil)
 		if err != nil {
 			// TODO(quis): One failure doesn't have to break the entire stream?
 			// Or does it all go wrong when it's out of order anyway?
@@ -80,7 +78,7 @@ func (s rpcService) AppendEntriesPipeline(server pb.Raft_AppendEntriesPipelineSe
 }
 
 func (s rpcService) AppendEntries(ctx context.Context, req *pb.AppendEntriesRequest) (*pb.AppendEntriesResponse, error) {
-	resp, err := s.handleRPC(codec.DecodeAppendEntriesRequest(req), nil)
+	resp, err := s.handleRPC(req.RpcHeader.GroupId, codec.DecodeAppendEntriesRequest(req), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +86,7 @@ func (s rpcService) AppendEntries(ctx context.Context, req *pb.AppendEntriesRequ
 }
 
 func (s rpcService) RequestVote(ctx context.Context, req *pb.RequestVoteRequest) (*pb.RequestVoteResponse, error) {
-	resp, err := s.handleRPC(codec.DecodeRequestVoteRequest(req), nil)
+	resp, err := s.handleRPC(req.RpcHeader.GroupId, codec.DecodeRequestVoteRequest(req), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +94,7 @@ func (s rpcService) RequestVote(ctx context.Context, req *pb.RequestVoteRequest)
 }
 
 func (s rpcService) TimeoutNow(ctx context.Context, req *pb.TimeoutNowRequest) (*pb.TimeoutNowResponse, error) {
-	resp, err := s.handleRPC(codec.DecodeTimeoutNowRequest(req), nil)
+	resp, err := s.handleRPC(req.RpcHeader.GroupId, codec.DecodeTimeoutNowRequest(req), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +106,7 @@ func (s rpcService) InstallSnapshot(server pb.Raft_InstallSnapshotServer) error 
 	if err != nil {
 		return err
 	}
-	resp, err := s.handleRPC(codec.DecodeInstallSnapshotRequest(isr), &snapshotStream{server, isr.GetData()})
+	resp, err := s.handleRPC(isr.RpcHeader.GroupId, codec.DecodeInstallSnapshotRequest(isr), &snapshotStream{server, isr.GetData()})
 	if err != nil {
 		return err
 	}

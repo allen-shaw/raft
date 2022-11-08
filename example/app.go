@@ -12,12 +12,13 @@ import (
 )
 
 var (
-	serverID string
-	IP       string
-	Port     int
-	HttpPort int
-	RaftDir  string
-	Peer     string
+	serverID  string
+	IP        string
+	Port      int
+	HttpPort  int
+	StorePort int
+	RaftDir   string
+	Peer      string
 )
 
 func init() {
@@ -25,6 +26,7 @@ func init() {
 	flag.StringVar(&IP, "ip", "127.0.0.1", "server ip, 127.0.0.1")
 	flag.IntVar(&Port, "port", 8081, "port, 8081")
 	flag.IntVar(&HttpPort, "httpport", 18081, "http port, 18081")
+	flag.IntVar(&StorePort, "storeport", 19081, "store port, 19081")
 	flag.StringVar(&RaftDir, "dir", "./data", "raft dir, ./data")
 	flag.StringVar(&Peer, "peer", "", "peer, 127.0.0.1:18081")
 }
@@ -58,7 +60,7 @@ func main() {
 
 	fmt.Println("node manager start success")
 
-	nodeConfigs := make([]*raft.NodeConfig, 1)
+	nodeConfigs := make([]*raft.NodeConfig, 2)
 	for i := range nodeConfigs {
 		nodeConfigs[i] = &raft.NodeConfig{
 			GroupID:     fmt.Sprintf("group%02d", i),
@@ -66,8 +68,9 @@ func main() {
 		}
 	}
 
+	table := NewTable("nothings")
 	for i, conf := range nodeConfigs {
-		err := nodeMgr.NewRaftNode(ctx, conf, NewTable(conf.GroupID))
+		err := nodeMgr.NewRaftNode(ctx, conf, table)
 		if err != nil {
 			fmt.Printf("new raft node fail,i=%v, conf=%+v, err:%v \n", i, conf, err)
 			panic(err)
@@ -81,6 +84,9 @@ func main() {
 		panic(err)
 	}
 	fmt.Println("api service start success")
+
+	storeService := NewStoreServer(nodeMgr, fmt.Sprintf("127.0.0.1:%v", StorePort), table)
+	storeService.Run()
 
 	terminate := make(chan os.Signal, 1)
 	signal.Notify(terminate, os.Interrupt)

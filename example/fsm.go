@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"github.com/AllenShaw19/raft/raft"
 	"io"
 	"sync"
@@ -19,8 +20,17 @@ func NewTable(id string) *Table {
 	return t
 }
 
-func (t *Table) Apply(log *raft.Log) interface{} {
+func (t *Table) Get(key string) string {
+	return t.m[key]
+}
 
+func (t *Table) Apply(log *raft.Log) interface{} {
+	req := &SetRequest{}
+	err := json.Unmarshal(log.Data, req)
+	if err != nil {
+		return err
+	}
+	t.m[req.Key] = req.Value
 	return nil
 }
 

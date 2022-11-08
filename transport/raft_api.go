@@ -110,11 +110,23 @@ func (r *raftPipelineAPI) receiver() {
 }
 
 type raftApi struct {
-	m *Manager
+	groupID          string
+	m                *Manager
+	rpcChan          chan raft.RPC
+	heartbeatFunc    func(raft.RPC)
+	heartbeatFuncMtx sync.Mutex
+}
+
+func newRaftApi(groupID string, m *Manager) *raftApi {
+	api := &raftApi{}
+	api.groupID = groupID
+	api.m = m
+	api.rpcChan = make(chan raft.RPC)
+	return api
 }
 
 func (r raftApi) Consumer() <-chan raft.RPC {
-	return r.m.rpcChan
+	return r.rpcChan
 }
 
 func (r raftApi) LocalAddr() raft.ServerAddress {
@@ -218,9 +230,15 @@ func (r raftApi) DecodePeer(p []byte) raft.ServerAddress {
 }
 
 func (r raftApi) SetHeartbeatHandler(cb func(rpc raft.RPC)) {
-	r.m.heartbeatFuncMtx.Lock()
-	r.m.heartbeatFunc = cb
-	r.m.heartbeatFuncMtx.Unlock()
+	r.heartbeatFuncMtx.Lock()
+	defer r.heartbeatFuncMtx.Unlock()
+	r.heartbeatFunc = cb
+}
+
+func (r raftApi) GetHeartbeatFunc() func(rpc raft.RPC) {
+	r.heartbeatFuncMtx.Lock()
+	defer r.heartbeatFuncMtx.Unlock()
+	return r.heartbeatFunc
 }
 
 func (r raftApi) TimeoutNow(id raft.ServerID, target raft.ServerAddress, args *raft.TimeoutNowRequest, resp *raft.TimeoutNowResponse) error {

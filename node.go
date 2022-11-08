@@ -8,6 +8,7 @@ import (
 	"github.com/AllenShaw19/raft/utils"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 type Node struct {
@@ -45,7 +46,7 @@ func (n *Node) Init(ctx context.Context, peers []string) error {
 	}
 
 	// get transport
-	transport, err := n.mgr.GetTransport()
+	transport, err := n.mgr.GetTransport(n.groupID)
 	if err != nil {
 		return err
 	}
@@ -135,6 +136,11 @@ func (n *Node) join(peer string) error {
 		return err
 	}
 	return nil
+}
+
+func (n *Node) Apply(cmd []byte) error {
+	f := n.raft.Apply(cmd, 3*time.Second)
+	return f.Error()
 }
 
 func genNodeID(serverID, groupID string) string {
