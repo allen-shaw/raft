@@ -58,7 +58,7 @@ func main() {
 
 	fmt.Println("node manager start success")
 
-	nodeConfigs := make([]*raft.NodeConfig, 1)
+	nodeConfigs := make([]*raft.NodeConfig, 2)
 	for i := range nodeConfigs {
 		nodeConfigs[i] = &raft.NodeConfig{
 			GroupID:     fmt.Sprintf("group%02d", i),
