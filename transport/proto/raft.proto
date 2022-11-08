@@ -12,6 +12,7 @@ service Raft {
 
 message RPCHeader {
   int64 protocol_version = 1;
+  string group_id = 2;
 }
 
 message Log {

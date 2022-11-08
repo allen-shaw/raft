@@ -3,10 +3,14 @@ package codec
 import (
 	"github.com/AllenShaw19/raft/raft"
 	pb "github.com/AllenShaw19/raft/transport/proto"
+	"github.com/AllenShaw19/raft/utils"
 )
 
 func encodeRPCHeader(s raft.RPCHeader) *pb.RPCHeader {
+	//fmt.Printf("[encodeRPCHeader] id:%v addr:%v \n", string(s.ID), string(s.Addr))
+	_, groupID := utils.ParseNodeID(string(s.ID))
 	return &pb.RPCHeader{
+		GroupId:         groupID,
 		ProtocolVersion: int64(s.ProtocolVersion),
 	}
 }

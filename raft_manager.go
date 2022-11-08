@@ -99,8 +99,8 @@ func (m *NodeManager) NewRaftNode(ctx context.Context, conf *NodeConfig, fsm raf
 	return nil
 }
 
-func (m *NodeManager) GetTransport() (raft.Transport, error) {
-	t := m.tm.Transport()
+func (m *NodeManager) GetTransport(groupID string) (raft.Transport, error) {
+	t := m.tm.Transport(groupID)
 	return t, nil
 }
 
@@ -137,5 +137,13 @@ func (m *NodeManager) Join(ctx context.Context, nodeID, groupID, address string)
 
 	fmt.Printf("node %v, group %v, address %v\n", nodeID, groupID, address)
 
+	return nil
+}
+
+func (m *NodeManager) GetNode(groupID string) *Node {
+	nodes := m.nodes.Get(groupID)
+	for _, n := range nodes {
+		return n
+	}
 	return nil
 }
