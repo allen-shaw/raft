@@ -10,10 +10,18 @@ import (
 
 var (
 	dbLogsPrefix = []byte("logs")
+	dbLogsSuffix = []byte("logs")
 	dbConfPrefix = []byte("conf")
+	dbConfSuffix = []byte("conf")
 
 	ErrKeyNotFound = errors.New("not found")
+	ErrKeyInvalid  = errors.New("key invalid")
 )
+
+func init() {
+	dbLogsSuffix[len(dbLogsSuffix)-1] = dbLogsSuffix[len(dbLogsSuffix)-1] + 1
+	dbConfSuffix[len(dbConfSuffix)-1] = dbConfSuffix[len(dbConfSuffix)-1] + 1
+}
 
 type PebbleStore struct {
 	db   *pebble.DB
@@ -30,7 +38,7 @@ func NewPebbleStore(path string) (*PebbleStore, error) {
 }
 
 func New(options Options) (*PebbleStore, error) {
-	db, err := pebble.Open("demo", &pebble.Options{})
+	db, err := pebble.Open(options.Path, &pebble.Options{})
 	if err != nil {
 		return nil, err
 	}
@@ -57,24 +65,33 @@ func (s *PebbleStore) Close() error {
 }
 
 func (s *PebbleStore) FirstIndex() (uint64, error) {
-	o := &pebble.IterOptions{}
+	o := &pebble.IterOptions{LowerBound: dbLogsPrefix, UpperBound: dbLogsSuffix}
 	iter := s.db.NewIter(o)
 	ok := iter.First()
 	if !ok {
 		return 0, nil
 	}
-	first := iter.Key()
+
+	key := iter.Key()
+	first, err := parseLogKey(key)
+	if err != nil {
+		return 0, err
+	}
 	return bytesToUint64(first), nil
 }
 
 func (s *PebbleStore) LastIndex() (uint64, error) {
-	o := &pebble.IterOptions{}
+	o := &pebble.IterOptions{LowerBound: dbLogsPrefix, UpperBound: dbLogsSuffix}
 	iter := s.db.NewIter(o)
 	ok := iter.Last()
 	if !ok {
 		return 0, nil
 	}
-	last := iter.Key()
+	key := iter.Key()
+	last, err := parseLogKey(key)
+	if err != nil {
+		return 0, err
+	}
 	return bytesToUint64(last), nil
 }
 
@@ -133,6 +150,7 @@ func (s *PebbleStore) StoreLogs(logs []*raft.Log) error {
 func (s *PebbleStore) DeleteRange(min, max uint64) error {
 	startKey := genLogKey(min)
 	endKey := genLogKey(max)
+	endKey[len(endKey)-1] = endKey[len(endKey)-1] + 1
 	return s.db.DeleteRange(startKey, endKey, &pebble.WriteOptions{Sync: true})
 }
 

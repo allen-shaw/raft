@@ -49,3 +49,11 @@ func genConfKey(key []byte) []byte {
 	k = append(k, key...)
 	return k
 }
+
+func parseLogKey(key []byte) ([]byte, error) {
+	if len(key) < len(dbLogsPrefix) {
+		return nil, ErrKeyInvalid
+	}
+	key = key[len(dbLogsPrefix):]
+	return key, nil
+}
