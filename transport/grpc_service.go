@@ -2,10 +2,12 @@ package transport
 
 import (
 	"context"
+	"fmt"
 	"github.com/AllenShaw19/raft/raft"
 	"github.com/AllenShaw19/raft/transport/codec"
 	pb "github.com/AllenShaw19/raft/transport/proto"
 	"io"
+	"time"
 )
 
 type snapshotStream struct {
@@ -65,6 +67,7 @@ func (s rpcService) AppendEntriesPipeline(server pb.Raft_AppendEntriesPipelineSe
 		if err != nil {
 			return err
 		}
+		fmt.Printf("[%v][AppendEntriesPipeline] %v\n", time.Now().Format("2006-01-02 15:04:05"), msg.RpcHeader.GroupId)
 		resp, err := s.handleRPC(msg.RpcHeader.GroupId, codec.DecodeAppendEntriesRequest(msg), nil)
 		if err != nil {
 			// TODO(quis): One failure doesn't have to break the entire stream?
@@ -78,6 +81,7 @@ func (s rpcService) AppendEntriesPipeline(server pb.Raft_AppendEntriesPipelineSe
 }
 
 func (s rpcService) AppendEntries(ctx context.Context, req *pb.AppendEntriesRequest) (*pb.AppendEntriesResponse, error) {
+	fmt.Printf("[%v][AppendEntries] %v\n", time.Now().Format("2006-01-02 15:04:05"), req.RpcHeader.GroupId)
 	resp, err := s.handleRPC(req.RpcHeader.GroupId, codec.DecodeAppendEntriesRequest(req), nil)
 	if err != nil {
 		return nil, err

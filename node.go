@@ -35,6 +35,8 @@ func NewNode(groupID string, mgr *NodeManager, logger Logger, svr *Server, fsm r
 func (n *Node) Init(ctx context.Context, peers []string) error {
 	config := raft.DefaultConfig()
 	config.LocalID = raft.ServerID(n.id)
+	config.HeartbeatTimeout = 3 * time.Second
+	config.ElectionTimeout = 3 * time.Second
 
 	baseDir := filepath.Join(n.server.RaftDir, n.id)
 	isNewNode := !utils.IsPathExists(baseDir)
