@@ -1,176 +1,406 @@
+// Copyright 2015 The etcd Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package raft
 
 import (
 	"fmt"
-	"time"
+	"log"
 
-	metrics "github.com/armon/go-metrics"
+	pb "go.etcd.io/etcd/raft/v3/raftpb"
 )
 
-// LogType describes various types of log entries.
-type LogType uint8
+type raftLog struct {
+	// storage contains all stable entries since the last snapshot.
+	storage Storage
 
-const (
-	// LogCommand is applied to a user FSM.
-	LogCommand LogType = iota
+	// unstable contains all unstable entries and snapshot.
+	// they will be saved into storage.
+	unstable unstable
 
-	// LogNoop is used to assert leadership.
-	LogNoop
+	// committed is the highest log position that is known to be in
+	// stable storage on a quorum of nodes.
+	committed uint64
+	// applied is the highest log position that the application has
+	// been instructed to apply to its state machine.
+	// Invariant: applied <= committed
+	applied uint64
 
-	// LogAddPeerDeprecated is used to add a new peer. This should only be used with
-	// older protocol versions designed to be compatible with unversioned
-	// Raft servers. See comments in config.go for details.
-	LogAddPeerDeprecated
+	logger Logger
 
-	// LogRemovePeerDeprecated is used to remove an existing peer. This should only be
-	// used with older protocol versions designed to be compatible with
-	// unversioned Raft servers. See comments in config.go for details.
-	LogRemovePeerDeprecated
+	// maxNextEntsSize is the maximum number aggregate byte size of the messages
+	// returned from calls to nextEnts.
+	maxNextEntsSize uint64
+}
 
-	// LogBarrier is used to ensure all preceding operations have been
-	// applied to the FSM. It is similar to LogNoop, but instead of returning
-	// once committed, it only returns once the FSM manager acks it. Otherwise,
-	// it is possible there are operations committed but not yet applied to
-	// the FSM.
-	LogBarrier
+// newLog returns log using the given storage and default options. It
+// recovers the log to the state that it just commits and applies the
+// latest snapshot.
+func newLog(storage Storage, logger Logger) *raftLog {
+	return newLogWithSize(storage, logger, noLimit)
+}
 
-	// LogConfiguration establishes a membership change configuration. It is
-	// created when a server is added, removed, promoted, etc. Only used
-	// when protocol version 1 or greater is in use.
-	LogConfiguration
-)
-
-// String returns LogType as a human readable string.
-func (lt LogType) String() string {
-	switch lt {
-	case LogCommand:
-		return "LogCommand"
-	case LogNoop:
-		return "LogNoop"
-	case LogAddPeerDeprecated:
-		return "LogAddPeerDeprecated"
-	case LogRemovePeerDeprecated:
-		return "LogRemovePeerDeprecated"
-	case LogBarrier:
-		return "LogBarrier"
-	case LogConfiguration:
-		return "LogConfiguration"
-	default:
-		return fmt.Sprintf("%d", lt)
+// newLogWithSize returns a log using the given storage and max
+// message size.
+func newLogWithSize(storage Storage, logger Logger, maxNextEntsSize uint64) *raftLog {
+	if storage == nil {
+		log.Panic("storage must not be nil")
 	}
+	log := &raftLog{
+		storage:         storage,
+		logger:          logger,
+		maxNextEntsSize: maxNextEntsSize,
+	}
+	firstIndex, err := storage.FirstIndex()
+	if err != nil {
+		panic(err) // TODO(bdarnell)
+	}
+	lastIndex, err := storage.LastIndex()
+	if err != nil {
+		panic(err) // TODO(bdarnell)
+	}
+	log.unstable.offset = lastIndex + 1
+	log.unstable.logger = logger
+	// Initialize our committed and applied pointers to the time of the last compaction.
+	log.committed = firstIndex - 1
+	log.applied = firstIndex - 1
+
+	return log
 }
 
-// Log entries are replicated to all members of the Raft cluster
-// and form the heart of the replicated state machine.
-type Log struct {
-	// Index holds the index of the log entry.
-	Index uint64
-
-	// Term holds the election term of the log entry.
-	Term uint64
-
-	// Type holds the type of the log entry.
-	Type LogType
-
-	// Data holds the log entry's type-specific data.
-	Data []byte
-
-	// Extensions holds an opaque byte slice of information for middleware. It
-	// is up to the client of the library to properly modify this as it adds
-	// layers and remove those layers when appropriate. This value is a part of
-	// the log, so very large values could cause timing issues.
-	//
-	// N.B. It is _up to the client_ to handle upgrade paths. For instance if
-	// using this with go-raftchunking, the client should ensure that all Raft
-	// peers are using a version that can handle that extension before ever
-	// actually triggering chunking behavior. It is sometimes sufficient to
-	// ensure that non-leaders are upgraded first, then the current leader is
-	// upgraded, but a leader changeover during this process could lead to
-	// trouble, so gating extension behavior via some flag in the client
-	// program is also a good idea.
-	Extensions []byte
-
-	// AppendedAt stores the time the leader first appended this log to it's
-	// LogStore. Followers will observe the leader's time. It is not used for
-	// coordination or as part of the replication protocol at all. It exists only
-	// to provide operational information for example how many seconds worth of
-	// logs are present on the leader which might impact follower's ability to
-	// catch up after restoring a large snapshot. We should never rely on this
-	// being in the past when appending on a follower or reading a log back since
-	// the clock skew can mean a follower could see a log with a future timestamp.
-	// In general too the leader is not required to persist the log before
-	// delivering to followers although the current implementation happens to do
-	// this.
-	AppendedAt time.Time
+func (l *raftLog) String() string {
+	return fmt.Sprintf("committed=%d, applied=%d, unstable.offset=%d, len(unstable.Entries)=%d", l.committed, l.applied, l.unstable.offset, len(l.unstable.entries))
 }
 
-// LogStore is used to provide an interface for storing
-// and retrieving logs in a durable fashion.
-type LogStore interface {
-	// FirstIndex returns the first index written. 0 for no entries.
-	FirstIndex() (uint64, error)
-
-	// LastIndex returns the last index written. 0 for no entries.
-	LastIndex() (uint64, error)
-
-	// GetLog gets a log entry at a given index.
-	GetLog(index uint64, log *Log) error
-
-	// StoreLog stores a log entry.
-	StoreLog(log *Log) error
-
-	// StoreLogs stores multiple log entries.
-	StoreLogs(logs []*Log) error
-
-	// DeleteRange deletes a range of log entries. The range is inclusive.
-	DeleteRange(min, max uint64) error
+// maybeAppend returns (0, false) if the entries cannot be appended. Otherwise,
+// it returns (last index of new entries, true).
+func (l *raftLog) maybeAppend(index, logTerm, committed uint64, ents ...pb.Entry) (lastnewi uint64, ok bool) {
+	if l.matchTerm(index, logTerm) {
+		lastnewi = index + uint64(len(ents))
+		ci := l.findConflict(ents)
+		switch {
+		case ci == 0:
+		case ci <= l.committed:
+			l.logger.Panicf("entry %d conflict with committed entry [committed(%d)]", ci, l.committed)
+		default:
+			offset := index + 1
+			l.append(ents[ci-offset:]...)
+		}
+		l.commitTo(min(committed, lastnewi))
+		return lastnewi, true
+	}
+	return 0, false
 }
 
-func oldestLog(s LogStore) (Log, error) {
-	var l Log
+func (l *raftLog) append(ents ...pb.Entry) uint64 {
+	if len(ents) == 0 {
+		return l.lastIndex()
+	}
+	if after := ents[0].Index - 1; after < l.committed {
+		l.logger.Panicf("after(%d) is out of range [committed(%d)]", after, l.committed)
+	}
+	l.unstable.truncateAndAppend(ents)
+	return l.lastIndex()
+}
 
-	// We might get unlucky and have a truncate right between getting first log
-	// index and fetching it so keep trying until we succeed or hard fail.
-	var lastFailIdx uint64
-	var lastErr error
+// findConflict finds the index of the conflict.
+// It returns the first pair of conflicting entries between the existing
+// entries and the given entries, if there are any.
+// If there is no conflicting entries, and the existing entries contains
+// all the given entries, zero will be returned.
+// If there is no conflicting entries, but the given entries contains new
+// entries, the index of the first new entry will be returned.
+// An entry is considered to be conflicting if it has the same index but
+// a different term.
+// The index of the given entries MUST be continuously increasing.
+func (l *raftLog) findConflict(ents []pb.Entry) uint64 {
+	for _, ne := range ents {
+		if !l.matchTerm(ne.Index, ne.Term) {
+			if ne.Index <= l.lastIndex() {
+				l.logger.Infof("found conflict at index %d [existing term: %d, conflicting term: %d]",
+					ne.Index, l.zeroTermOnErrCompacted(l.term(ne.Index)), ne.Term)
+			}
+			return ne.Index
+		}
+	}
+	return 0
+}
+
+// findConflictByTerm takes an (index, term) pair (indicating a conflicting log
+// entry on a leader/follower during an append) and finds the largest index in
+// log l with a term <= `term` and an index <= `index`. If no such index exists
+// in the log, the log's first index is returned.
+//
+// The index provided MUST be equal to or less than l.lastIndex(). Invalid
+// inputs log a warning and the input index is returned.
+func (l *raftLog) findConflictByTerm(index uint64, term uint64) uint64 {
+	if li := l.lastIndex(); index > li {
+		// NB: such calls should not exist, but since there is a straightfoward
+		// way to recover, do it.
+		//
+		// It is tempting to also check something about the first index, but
+		// there is odd behavior with peers that have no log, in which case
+		// lastIndex will return zero and firstIndex will return one, which
+		// leads to calls with an index of zero into this method.
+		l.logger.Warningf("index(%d) is out of range [0, lastIndex(%d)] in findConflictByTerm",
+			index, li)
+		return index
+	}
 	for {
-		firstIdx, err := s.FirstIndex()
-		if err != nil {
-			return l, err
-		}
-		if firstIdx == 0 {
-			return l, ErrLogNotFound
-		}
-		if firstIdx == lastFailIdx {
-			// Got same index as last time around which errored, don't bother trying
-			// to fetch it again just return the error.
-			return l, lastErr
-		}
-		err = s.GetLog(firstIdx, &l)
-		if err == nil {
-			// We found the oldest log, break the loop
+		logTerm, err := l.term(index)
+		if logTerm <= term || err != nil {
 			break
 		}
-		// We failed, keep trying to see if there is a new firstIndex
-		lastFailIdx = firstIdx
-		lastErr = err
+		index--
 	}
-	return l, nil
+	return index
 }
 
-func emitLogStoreMetrics(s LogStore, prefix []string, interval time.Duration, stopCh <-chan struct{}) {
-	for {
-		select {
-		case <-time.After(interval):
-			// In error case emit 0 as the age
-			ageMs := float32(0.0)
-			l, err := oldestLog(s)
-			if err == nil && !l.AppendedAt.IsZero() {
-				ageMs = float32(time.Since(l.AppendedAt).Milliseconds())
-			}
-			metrics.SetGauge(append(prefix, "oldestLogAge"), ageMs)
-		case <-stopCh:
-			return
+func (l *raftLog) unstableEntries() []pb.Entry {
+	if len(l.unstable.entries) == 0 {
+		return nil
+	}
+	return l.unstable.entries
+}
+
+// nextEnts returns all the available entries for execution.
+// If applied is smaller than the index of snapshot, it returns all committed
+// entries after the index of snapshot.
+func (l *raftLog) nextEnts() (ents []pb.Entry) {
+	off := max(l.applied+1, l.firstIndex())
+	if l.committed+1 > off {
+		ents, err := l.slice(off, l.committed+1, l.maxNextEntsSize)
+		if err != nil {
+			l.logger.Panicf("unexpected error when getting unapplied entries (%v)", err)
+		}
+		return ents
+	}
+	return nil
+}
+
+// hasNextEnts returns if there is any available entries for execution. This
+// is a fast check without heavy raftLog.slice() in raftLog.nextEnts().
+func (l *raftLog) hasNextEnts() bool {
+	off := max(l.applied+1, l.firstIndex())
+	return l.committed+1 > off
+}
+
+// hasPendingSnapshot returns if there is pending snapshot waiting for applying.
+func (l *raftLog) hasPendingSnapshot() bool {
+	return l.unstable.snapshot != nil && !IsEmptySnap(*l.unstable.snapshot)
+}
+
+func (l *raftLog) snapshot() (pb.Snapshot, error) {
+	if l.unstable.snapshot != nil {
+		return *l.unstable.snapshot, nil
+	}
+	return l.storage.Snapshot()
+}
+
+func (l *raftLog) firstIndex() uint64 {
+	if i, ok := l.unstable.maybeFirstIndex(); ok {
+		return i
+	}
+	index, err := l.storage.FirstIndex()
+	if err != nil {
+		panic(err) // TODO(bdarnell)
+	}
+	return index
+}
+
+func (l *raftLog) lastIndex() uint64 {
+	if i, ok := l.unstable.maybeLastIndex(); ok {
+		return i
+	}
+	i, err := l.storage.LastIndex()
+	if err != nil {
+		panic(err) // TODO(bdarnell)
+	}
+	return i
+}
+
+func (l *raftLog) commitTo(tocommit uint64) {
+	// never decrease commit
+	if l.committed < tocommit {
+		if l.lastIndex() < tocommit {
+			l.logger.Panicf("tocommit(%d) is out of range [lastIndex(%d)]. Was the raft log corrupted, truncated, or lost?", tocommit, l.lastIndex())
+		}
+		l.committed = tocommit
+	}
+}
+
+func (l *raftLog) appliedTo(i uint64) {
+	if i == 0 {
+		return
+	}
+	if l.committed < i || i < l.applied {
+		l.logger.Panicf("applied(%d) is out of range [prevApplied(%d), committed(%d)]", i, l.applied, l.committed)
+	}
+	l.applied = i
+}
+
+func (l *raftLog) stableTo(i, t uint64) { l.unstable.stableTo(i, t) }
+
+func (l *raftLog) stableSnapTo(i uint64) { l.unstable.stableSnapTo(i) }
+
+func (l *raftLog) lastTerm() uint64 {
+	t, err := l.term(l.lastIndex())
+	if err != nil {
+		l.logger.Panicf("unexpected error when getting the last term (%v)", err)
+	}
+	return t
+}
+
+func (l *raftLog) term(i uint64) (uint64, error) {
+	// the valid term range is [index of dummy entry, last index]
+	dummyIndex := l.firstIndex() - 1
+	if i < dummyIndex || i > l.lastIndex() {
+		// TODO: return an error instead?
+		return 0, nil
+	}
+
+	if t, ok := l.unstable.maybeTerm(i); ok {
+		return t, nil
+	}
+
+	t, err := l.storage.Term(i)
+	if err == nil {
+		return t, nil
+	}
+	if err == ErrCompacted || err == ErrUnavailable {
+		return 0, err
+	}
+	panic(err) // TODO(bdarnell)
+}
+
+func (l *raftLog) entries(i, maxsize uint64) ([]pb.Entry, error) {
+	if i > l.lastIndex() {
+		return nil, nil
+	}
+	return l.slice(i, l.lastIndex()+1, maxsize)
+}
+
+// allEntries returns all entries in the log.
+func (l *raftLog) allEntries() []pb.Entry {
+	ents, err := l.entries(l.firstIndex(), noLimit)
+	if err == nil {
+		return ents
+	}
+	if err == ErrCompacted { // try again if there was a racing compaction
+		return l.allEntries()
+	}
+	// TODO (xiangli): handle error?
+	panic(err)
+}
+
+// isUpToDate determines if the given (lastIndex,term) log is more up-to-date
+// by comparing the index and term of the last entries in the existing logs.
+// If the logs have last entries with different terms, then the log with the
+// later term is more up-to-date. If the logs end with the same term, then
+// whichever log has the larger lastIndex is more up-to-date. If the logs are
+// the same, the given log is up-to-date.
+func (l *raftLog) isUpToDate(lasti, term uint64) bool {
+	return term > l.lastTerm() || (term == l.lastTerm() && lasti >= l.lastIndex())
+}
+
+func (l *raftLog) matchTerm(i, term uint64) bool {
+	t, err := l.term(i)
+	if err != nil {
+		return false
+	}
+	return t == term
+}
+
+func (l *raftLog) maybeCommit(maxIndex, term uint64) bool {
+	if maxIndex > l.committed && l.zeroTermOnErrCompacted(l.term(maxIndex)) == term {
+		l.commitTo(maxIndex)
+		return true
+	}
+	return false
+}
+
+func (l *raftLog) restore(s pb.Snapshot) {
+	l.logger.Infof("log [%s] starts to restore snapshot [index: %d, term: %d]", l, s.Metadata.Index, s.Metadata.Term)
+	l.committed = s.Metadata.Index
+	l.unstable.restore(s)
+}
+
+// slice returns a slice of log entries from lo through hi-1, inclusive.
+func (l *raftLog) slice(lo, hi, maxSize uint64) ([]pb.Entry, error) {
+	err := l.mustCheckOutOfBounds(lo, hi)
+	if err != nil {
+		return nil, err
+	}
+	if lo == hi {
+		return nil, nil
+	}
+	var ents []pb.Entry
+	if lo < l.unstable.offset {
+		storedEnts, err := l.storage.Entries(lo, min(hi, l.unstable.offset), maxSize)
+		if err == ErrCompacted {
+			return nil, err
+		} else if err == ErrUnavailable {
+			l.logger.Panicf("entries[%d:%d) is unavailable from storage", lo, min(hi, l.unstable.offset))
+		} else if err != nil {
+			panic(err) // TODO(bdarnell)
+		}
+
+		// check if ents has reached the size limitation
+		if uint64(len(storedEnts)) < min(hi, l.unstable.offset)-lo {
+			return storedEnts, nil
+		}
+
+		ents = storedEnts
+	}
+	if hi > l.unstable.offset {
+		unstable := l.unstable.slice(max(lo, l.unstable.offset), hi)
+		if len(ents) > 0 {
+			combined := make([]pb.Entry, len(ents)+len(unstable))
+			n := copy(combined, ents)
+			copy(combined[n:], unstable)
+			ents = combined
+		} else {
+			ents = unstable
 		}
 	}
+	return limitSize(ents, maxSize), nil
+}
+
+// l.firstIndex <= lo <= hi <= l.firstIndex + len(l.entries)
+func (l *raftLog) mustCheckOutOfBounds(lo, hi uint64) error {
+	if lo > hi {
+		l.logger.Panicf("invalid slice %d > %d", lo, hi)
+	}
+	fi := l.firstIndex()
+	if lo < fi {
+		return ErrCompacted
+	}
+
+	length := l.lastIndex() + 1 - fi
+	if hi > fi+length {
+		l.logger.Panicf("slice[%d,%d) out of bound [%d,%d]", lo, hi, fi, l.lastIndex())
+	}
+	return nil
+}
+
+func (l *raftLog) zeroTermOnErrCompacted(t uint64, err error) uint64 {
+	if err == nil {
+		return t
+	}
+	if err == ErrCompacted {
+		return 0
+	}
+	l.logger.Panicf("unexpected error (%v)", err)
+	return 0
 }
