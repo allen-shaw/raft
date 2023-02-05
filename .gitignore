@@ -13,3 +13,11 @@
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
+/example/raftexample-1/
+/example/raftexample-1-snap/
+/example/raftexample-2/
+/example/raftexample-2-snap/
+/example/raftexample-3/
+/example/raftexample-3-snap/
+/example/raftexample
+/.idea/
