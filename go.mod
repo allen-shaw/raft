@@ -1,8 +1,10 @@
 module github.com/allen-shaw/raft
 
-go 1.19
+go 1.18
 
 require (
+	github.com/etcd-io/etcd v3.3.27+incompatible
+	github.com/golang/protobuf v1.5.2
 	go.etcd.io/etcd/client/pkg/v3 v3.5.7
 	go.etcd.io/etcd/raft/v3 v3.5.7
 	go.etcd.io/etcd/server/v3 v3.5.7
@@ -15,7 +17,6 @@ require (
 	github.com/coreos/go-semver v0.3.0 // indirect
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
-	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
 	github.com/prometheus/client_golang v1.11.1 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
